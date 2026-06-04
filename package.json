@@ -4,9 +4,9 @@
   "description": "Smart overlay and racing coach for Assetto Corsa.",
   "main": "lua-app/race-coach-overlay.lua",
   "scripts": {
-    "build": "tsc --noEmit && esbuild overlay/app.ts --bundle --outfile=overlay/app.js",
-    "watch": "esbuild overlay/app.ts --bundle --outfile=overlay/app.js --watch",
-    "zip": "mkdir -p apps/lua/race-coach-overlay && cp -r lua-app/* apps/lua/race-coach-overlay/ && mkdir -p apps/lua/race-coach-overlay/overlay && cp overlay/index.html overlay/style.css overlay/app.js apps/lua/race-coach-overlay/overlay/ && python3 -m zipfile -c race-coach-overlay.zip apps/ && rm -rf apps/"
+    "build": "tsc --noEmit && esbuild overlay/app.ts --bundle --outfile=overlay/app.js && esbuild overlay/review.ts --bundle --outfile=overlay/review.js",
+    "watch": "esbuild overlay/app.ts overlay/review.ts --bundle --outdir=overlay --watch",
+    "zip": "mkdir -p apps/lua/race-coach-overlay && cp -r lua-app/* apps/lua/race-coach-overlay/ && mkdir -p apps/lua/race-coach-overlay/overlay && cp overlay/index.html overlay/review.html overlay/style.css overlay/app.js overlay/review.js apps/lua/race-coach-overlay/overlay/ && python3 -m zipfile -c race-coach-overlay.zip apps/ && rm -rf apps/"
   },
   "keywords": [
     "assetto-corsa",

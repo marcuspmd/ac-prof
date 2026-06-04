@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Race Coach — Telemetry Review Dashboard</title>
+  <!-- Google Fonts Outfit & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-primary: #0b0f19;
+      --bg-surface: rgba(22, 28, 45, 0.45);
+      --bg-panel: rgba(17, 24, 39, 0.8);
+      --border-color: rgba(255, 255, 255, 0.08);
+      --text-primary: #f3f4f6;
+      --text-secondary: #9ca3af;
+      --text-muted: #6b7280;
+      
+      --color-throttle: #10b981;
+      --color-brake: #ef4444;
+      --color-clutch: #3b82f6;
+      --color-steer: #f59e0b;
+      --color-understeer: #ff7b00;
+      --color-oversteer: #ec4899;
+      --color-spin: #facc15;
+      --color-lockup: #ef4444;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Outfit', sans-serif;
+      color: var(--text-primary);
+      background-color: var(--bg-primary);
+      background-image: radial-gradient(circle at 50% 0%, #1e293b 0%, #0b0f19 75%);
+      min-height: 100vh;
+      overflow-x: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 24px;
+      background: rgba(11, 15, 25, 0.8);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-color);
+      z-index: 100;
+    }
+
+    .logo-container {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-text {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      background: linear-gradient(90deg, #3b82f6, #60a5fa);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .logo-subtitle {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-top: 4px;
+    }
+
+    .upload-btn-wrapper {
+      position: relative;
+      overflow: hidden;
+      display: inline-block;
+    }
+
+    .btn-action {
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      border: none;
+      color: white;
+      padding: 8px 18px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+    }
+
+    .btn-action:hover {
+      background: linear-gradient(135deg, #3b82f6, #2563eb);
+      box-shadow: 0 4px 16px rgba(37, 99, 235, 0.4);
+      transform: translateY(-1px);
+    }
+
+    .upload-btn-wrapper input[type=file] {
+      font-size: 100px;
+      position: absolute;
+      left: 0;
+      top: 0;
+      opacity: 0;
+      cursor: pointer;
+    }
+
+    main {
+      flex-grow: 1;
+      display: grid;
+      grid-template-columns: 350px 1fr 380px;
+      gap: 16px;
+      padding: 16px;
+      height: calc(100vh - 66px);
+      max-height: calc(100vh - 66px);
+      overflow: hidden;
+    }
+
+    @media (max-width: 1200px) {
+      main {
+        grid-template-columns: 1fr;
+        height: auto;
+        max-height: none;
+        overflow: visible;
+      }
+    }
+
+    .panel-col {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      height: 100%;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .panel-col::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .panel-col::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .panel-col::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
+    }
+
+    .panel-col::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .card-glass {
+      background: var(--bg-surface);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--border-color);
+      border-radius: 14px;
+      padding: 16px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .card-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-secondary);
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      padding-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    /* Drag and Drop Zone */
+    #drop-zone {
+      border: 2px dashed rgba(255, 255, 255, 0.15);
+      border-radius: 12px;
+      padding: 24px 16px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      background: rgba(255, 255, 255, 0.01);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+
+    #drop-zone.dragover {
+      border-color: #3b82f6;
+      background: rgba(59, 130, 246, 0.05);
+    }
+
+    #drop-zone span.icon {
+      font-size: 32px;
+    }
+
+    #drop-zone p.title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    #drop-zone p.desc {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* Summary Details */
+    .metric-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+    }
+
+    .metric-label {
+      color: var(--text-secondary);
+    }
+
+    .metric-val {
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .metric-val-mono {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 600;
+    }
+
+    .sector-badge-container {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      margin-top: 4px;
+    }
+
+    .sector-badge {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      padding: 6px;
+      border-radius: 6px;
+      text-align: center;
+    }
+
+    .sector-badge .s-title {
+      font-size: 9px;
+      color: var(--text-muted);
+      font-weight: 700;
+      text-transform: uppercase;
+      margin-bottom: 2px;
+    }
+
+    .sector-badge .s-time {
+      font-size: 11px;
+      font-weight: 600;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Interactive Live HUD Gauges */
+    .hud-preview {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      align-items: center;
+      padding: 8px 0;
+    }
+
+    .inputs-split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      width: 100%;
+      gap: 12px;
+    }
+
+    .live-steering-wrapper {
+      position: relative;
+      width: 100px;
+      height: 100px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .steering-wheel-svg {
+      width: 80px;
+      height: 80px;
+      fill: #1f2937;
+      stroke: #4b5563;
+      stroke-width: 4px;
+      transition: transform 0.05s linear;
+    }
+
+    .live-steer-label {
+      position: absolute;
+      bottom: -6px;
+      font-size: 11px;
+      font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .live-pedals {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .pedal-channel-review {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .p-lbl {
+      font-size: 9px;
+      font-weight: 700;
+      color: var(--text-secondary);
+    }
+
+    .p-bar-review {
+      height: 6px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 3px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .p-fill-review {
+      height: 100%;
+      width: 0%;
+      border-radius: 3px;
+      transition: width 0.05s ease-out;
+    }
+
+    .thr-fill { background: var(--color-throttle); box-shadow: 0 0 6px var(--color-throttle); }
+    .brk-fill { background: var(--color-brake); box-shadow: 0 0 6px var(--color-brake); }
+    .clt-fill { background: var(--color-clutch); box-shadow: 0 0 6px var(--color-clutch); }
+
+    .live-tyres {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      width: 100%;
+      margin-top: 4px;
+    }
+
+    .tyre-dot {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 6px;
+      padding: 6px;
+      text-align: center;
+      font-size: 10px;
+      font-weight: 600;
+      transition: all 0.1s ease;
+    }
+
+    /* AI Prompter Card */
+    .ai-prompt-area {
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: #93c5fd;
+      resize: none;
+      height: 160px;
+      width: 100%;
+      overflow-y: auto;
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--text-primary);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+      width: 100%;
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    /* Center Map Column */
+    .map-container {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      gap: 16px;
+    }
+
+    .canvas-card {
+      flex-grow: 1;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(22, 28, 45, 0.25);
+      min-height: 350px;
+    }
+
+    #track-canvas {
+      width: 100%;
+      height: 100%;
+      max-height: 100%;
+      max-width: 100%;
+    }
+
+    .canvas-legend {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      background: rgba(11, 15, 25, 0.7);
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+      font-size: 10px;
+      backdrop-filter: blur(8px);
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .legend-color {
+      width: 12px;
+      height: 6px;
+      border-radius: 2px;
+    }
+
+    .legend-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .map-controls {
+      position: absolute;
+      bottom: 16px;
+      right: 16px;
+      display: flex;
+      gap: 6px;
+    }
+
+    .btn-icon {
+      background: rgba(11, 15, 25, 0.7);
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-weight: 700;
+      backdrop-filter: blur(8px);
+      transition: all 0.2s ease;
+    }
+
+    .btn-icon:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    /* Timeline Slider Bar */
+    .timeline-card {
+      flex-shrink: 0;
+    }
+
+    .timeline-slider-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    input[type=range].scrubber {
+      flex-grow: 1;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
+      outline: none;
+      -webkit-appearance: none;
+      appearance: none;
+      cursor: pointer;
+    }
+
+    input[type=range].scrubber::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #3b82f6;
+      border: 2px solid white;
+      box-shadow: 0 0 6px rgba(59, 130, 246, 0.6);
+      transition: transform 0.1s ease;
+    }
+
+    input[type=range].scrubber::-webkit-slider-thumb:hover {
+      transform: scale(1.25);
+    }
+
+    .time-readout {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      width: 75px;
+      text-align: right;
+    }
+
+    /* Right Column: Corners & Charts */
+    .corner-row {
+      display: grid;
+      grid-template-columns: 50px repeat(4, 1fr);
+      padding: 8px 6px;
+      border-radius: 6px;
+      font-size: 11px;
+      align-items: center;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    }
+
+    .corner-row:hover {
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .corner-row.selected {
+      background: rgba(59, 130, 246, 0.15);
+      border-color: rgba(59, 130, 246, 0.3);
+    }
+
+    .corner-hdr {
+      font-weight: 700;
+      color: var(--text-muted);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      cursor: default;
+    }
+
+    .corner-hdr:hover {
+      background: transparent;
+    }
+
+    .grade-badge {
+      display: inline-block;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 4px;
+      text-align: center;
+      font-size: 10px;
+    }
+
+    .charts-container {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      height: 250px;
+      flex-shrink: 0;
+    }
+
+    .chart-wrapper {
+      position: relative;
+      flex-grow: 1;
+      background: rgba(0, 0, 0, 0.15);
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.03);
+      padding: 4px;
+    }
+
+    #telemetry-canvas {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Modal Warning style for no-telemetry state */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      height: 100%;
+      color: var(--text-secondary);
+      text-align: center;
+      padding: 40px;
+    }
+
+    .empty-state span.icon {
+      font-size: 64px;
+      opacity: 0.3;
+      animation: float 4s infinite ease-in-out;
+    }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-10px); }
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo-container">
+      <div>
+        <h1 class="logo-text">RACE COACH</h1>
+        <div class="logo-subtitle">Review de Telemetria</div>
+      </div>
+    </div>
+    <div class="upload-btn-wrapper">
+      <button class="btn-action">
+        <span style="font-size: 16px;">📂</span> Carregar Telemetria
+      </button>
+      <input type="file" id="file-loader" accept=".json" />
+    </div>
+  </header>
+
+  <!-- Empty state displayed when no file is loaded -->
+  <div id="dashboard-empty" class="empty-state">
+    <span class="icon">🏎️</span>
+    <h2>Aguardando Dados de Telemetria</h2>
+    <p style="max-width: 450px; font-size: 14px; margin-top: 4px; color: var(--text-secondary);">
+      Para analisar sua volta, arraste e solte o arquivo de telemetria JSON gerado na pasta 
+      <code style="background: rgba(0,0,0,0.4); padding: 2px 6px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #60a5fa;">apps/lua/race-coach-overlay/telemetry_logs/</code> 
+      ou clique no botão acima para carregar.
+    </p>
+    <div id="drop-zone" style="width: 400px; margin-top: 20px;">
+      <span class="icon">📥</span>
+      <p class="title">Arraste o arquivo JSON aqui</p>
+      <p class="desc">Qualquer volta completada com o app ativo</p>
+    </div>
+  </div>
+
+  <!-- Dashboard Grid -->
+  <main id="dashboard-main" class="hidden">
+    <!-- Left Column: Metadata & HUD & AI Prompter -->
+    <div class="panel-col">
+      <!-- Lap Information -->
+      <div class="card-glass">
+        <div class="card-title">Resumo da Volta</div>
+        <div class="metric-row">
+          <span class="metric-label">Pista</span>
+          <span id="sum-track" class="metric-val">Brands Hatch GP</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Carro</span>
+          <span id="sum-car" class="metric-val">Ferrari 488 GT3</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Tempo da Volta</span>
+          <span id="sum-laptime" class="metric-val-mono metric-val">1:28.450</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Data/Hora</span>
+          <span id="sum-date" class="metric-val" style="font-size: 11px;">04/06/2026 10:55</span>
+        </div>
+        <div class="sector-badge-container">
+          <div class="sector-badge">
+            <div class="s-title">Setor 1</div>
+            <div id="sum-s1" class="s-time">--.---</div>
+          </div>
+          <div class="sector-badge">
+            <div class="s-title">Setor 2</div>
+            <div id="sum-s2" class="s-time">--.---</div>
+          </div>
+          <div class="sector-badge">
+            <div class="s-title">Setor 3</div>
+            <div id="sum-s3" class="s-time">--.---</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Telemetry Stats -->
+      <div class="card-glass">
+        <div class="card-title">Pontos Selecionados</div>
+        <div class="hud-preview">
+          <!-- Steering wheel & Pedals split -->
+          <div class="inputs-split">
+            <div class="live-steering-wrapper">
+              <!-- Custom simple steering wheel SVG -->
+              <svg class="steering-wheel-svg" id="svg-steering" viewBox="0 0 100 100">
+                <circle cx="50" cy="50" r="44" fill="none" stroke-width="6" />
+                <line x1="12" y1="50" x2="88" y2="50" stroke-width="8" />
+                <line x1="50" y1="50" x2="50" y2="88" stroke-width="8" />
+                <circle cx="50" cy="50" r="8" fill="#1f2937" />
+                <!-- Top marker dot -->
+                <circle cx="50" cy="14" r="4" fill="#ef4444" stroke="none" />
+              </svg>
+              <div class="live-steer-label" id="hud-steer">0°</div>
+            </div>
+            
+            <div class="live-pedals">
+              <div class="pedal-channel-review">
+                <div class="p-lbl">THR <span id="lbl-thr" style="float: right;">0%</span></div>
+                <div class="p-bar-review">
+                  <div class="p-fill-review thr-fill" id="hud-thr"></div>
+                </div>
+              </div>
+              <div class="pedal-channel-review">
+                <div class="p-lbl">BRK <span id="lbl-brk" style="float: right;">0%</span></div>
+                <div class="p-bar-review">
+                  <div class="p-fill-review brk-fill" id="hud-brk"></div>
+                </div>
+              </div>
+              <div class="pedal-channel-review">
+                <div class="p-lbl">CLT <span id="lbl-clt" style="float: right;">0%</span></div>
+                <div class="p-bar-review">
+                  <div class="p-fill-review clt-fill" id="hud-clt"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Speed & RPM & Gear -->
+          <div style="display: flex; justify-content: space-around; width: 100%; margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 8px;">
+            <div style="text-align: center;">
+              <div style="font-size: 8px; color: var(--text-muted); font-weight: 700;">VELOCIDADE</div>
+              <div style="font-size: 20px; font-weight: 700; font-family: 'JetBrains Mono', monospace;" id="hud-speed">0 <span style="font-size: 10px; color: var(--text-muted);">km/h</span></div>
+            </div>
+            <div style="text-align: center;">
+              <div style="font-size: 8px; color: var(--text-muted); font-weight: 700;">MARCHA</div>
+              <div style="font-size: 20px; font-weight: 700; color: #3b82f6;" id="hud-gear">N</div>
+            </div>
+            <div style="text-align: center;">
+              <div style="font-size: 8px; color: var(--text-muted); font-weight: 700;">RPM</div>
+              <div style="font-size: 20px; font-weight: 700; font-family: 'JetBrains Mono', monospace;" id="hud-rpm">0</div>
+            </div>
+          </div>
+
+          <!-- Tyres Slip -->
+          <div class="live-tyres">
+            <div class="tyre-dot" id="t-fl">FL: 0°</div>
+            <div class="tyre-dot" id="t-fr">FR: 0°</div>
+            <div class="tyre-dot" id="t-rl">RL: 0°</div>
+            <div class="tyre-dot" id="t-rr">RR: 0°</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI Prompter -->
+      <div class="card-glass">
+        <div class="card-title">Copiar Prompt para IA</div>
+        <p style="font-size: 11px; color: var(--text-muted); margin-top: -6px;">Copie os dados analíticos estruturados para enviar ao ChatGPT/Claude para receber dicas detalhadas de pilotagem.</p>
+        <textarea id="ai-prompt-box" class="ai-prompt-area" readonly></textarea>
+        <button class="btn-secondary" id="btn-copy-prompt">
+          <span>📋</span> Copiar Prompt do Coach
+        </button>
+      </div>
+    </div>
+
+    <!-- Center Column: Track Map & Timeline Scrubber -->
+    <div class="map-container">
+      <div class="card-glass canvas-card" style="padding: 0;">
+        <canvas id="track-canvas"></canvas>
+        <div class="canvas-legend">
+          <div class="legend-item">
+            <div class="legend-color" style="background: rgba(255,255,255,0.15);"></div>
+            <span>Borda da Pista</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="border-top: 2px dashed rgba(255,255,255,0.35);"></div>
+            <span>Linha Desejada (Spline)</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background: linear-gradient(90deg, var(--color-throttle), var(--color-brake));"></div>
+            <span>Linha Realizada (THR/BRK)</span>
+          </div>
+          <div class="legend-item" style="margin-top: 4px;">
+            <div class="legend-dot" style="background: var(--color-understeer);"></div>
+            <span>Subesterço (Understeer)</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-dot" style="background: var(--color-oversteer);"></div>
+            <span>Sobresterço (Oversteer)</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-dot" style="background: var(--color-spin);"></div>
+            <span>Patinamento (Wheelspin)</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-dot" style="background: var(--color-lockup);"></div>
+            <span>Travamento (Lockup)</span>
+          </div>
+        </div>
+
+        <div class="map-controls">
+          <button class="btn-icon" id="btn-zoom-in" title="Aumentar Zoom">+</button>
+          <button class="btn-icon" id="btn-zoom-out" title="Diminuir Zoom">-</button>
+          <button class="btn-icon" id="btn-zoom-fit" title="Ajustar Mapa">⛶</button>
+          <button class="btn-icon" id="btn-toggle-color" title="Alternar coloração do traçado" style="font-size: 12px; width: 42px;">THR</button>
+        </div>
+      </div>
+
+      <!-- Scrubber -->
+      <div class="card-glass timeline-card">
+        <div class="timeline-slider-wrapper">
+          <input type="range" min="0" max="1000" value="0" class="scrubber" id="telemetry-scrubber" />
+          <div class="time-readout" id="scrubber-time">00:00.000</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Column: Corner scorecard & Charts -->
+    <div class="panel-col">
+      <!-- Corner Scorecard -->
+      <div class="card-glass" style="flex-grow: 1;">
+        <div class="card-title">Scorecard de Curvas</div>
+        <div style="overflow-y: auto; max-height: 280px; padding-right: 4px;" id="corner-list-container">
+          <!-- Header Row -->
+          <div class="corner-row corner-hdr">
+            <span>Curva</span>
+            <span style="text-align: center;">Nota</span>
+            <span style="text-align: right;">Real / Alvo</span>
+            <span style="text-align: right;">Trail Brk</span>
+            <span style="text-align: right;">Grip</span>
+          </div>
+          <div id="corner-rows-anchor">
+            <!-- Dynamic corner items will be added here -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Charts -->
+      <div class="card-glass" style="height: 380px;">
+        <div class="card-title">Gráficos de Telemetria</div>
+        <div class="charts-container">
+          <!-- Canvas containing speed & pedal inputs timeline -->
+          <div class="chart-wrapper">
+            <canvas id="telemetry-canvas"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="review.js"></script>
+</body>
+</html>

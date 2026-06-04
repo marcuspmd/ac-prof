@@ -2,6 +2,8 @@
 local physics = require('physics-calc')
 local uiBrowser = require('ui-browser')
 local painter = require('track-painter')
+local recorder = require('telemetry-recorder')
+
 
 local function log(msg)
   ac.log("[Race Coach Overlay] " .. tostring(msg))
@@ -78,4 +80,7 @@ function script.update(dt)
     totalBrakingDistanceNeeded,
     physics.maxObservedDecelG
   )
+
+  -- 5. Record telemetry data
+  recorder.update(dt)
 end
