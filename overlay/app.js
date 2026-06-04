@@ -1,63 +1,56 @@
 "use strict";
-// Lógica de Modos de Exibição (Janelas Separadas)
-const mode = window.location.hash ? window.location.hash.substring(1) : "full";
-document.body.className = `mode-${mode}`;
-console.log(`[Overlay] Initialized in mode: ${mode}`);
-// Configurações e Variáveis do Veículo (GT3 padrão)
-const WHEELBASE = 2.65; // metros (entre-eixos aproximado)
-const MAX_STEER_RAD = 0.45; // ~26 graus de esterço máximo da roda dianteira
-const SLIP_ANGLE_PEAK = 7.0; // graus (pico de aderência dos pneus)
-const G_SCALE = 35; // Pixels por G no canvas
-// Histórico para o Diagrama G-G
-const ggHistory = [];
-const MAX_GG_HISTORY = 40;
-// Estado de Coaching e Debounce de Voz
-let lastFeedbackTime = 0;
-const FEEDBACK_COOLDOWN = 8000; // 8 segundos entre mensagens faladas para reduzir o ruído
-const AUDIO_ENABLED = false; // Desabilitar som / fala por enquanto conforme solicitado pelo usuário
-// Elementos DOM
-const speedIndicator = document.getElementById("speed-indicator");
-const gearIndicator = document.getElementById("gear-indicator");
-const rpmBar = document.getElementById("rpm-bar");
-const throttleBar = document.getElementById("throttle-bar");
-const brakeBar = document.getElementById("brake-bar");
-const coachMessage = document.getElementById("coach-message");
-const coachPanel = document.getElementById("coach-panel");
-const nextTurnDisplay = document.getElementById("next-turn-display");
-const nextTurnArrow = document.getElementById("next-turn-arrow");
-const nextTurnDistance = document.getElementById("next-turn-distance");
-const nextTurnTargetSpeed = document.getElementById("next-turn-target-speed");
-const nextTurnAction = document.getElementById("next-turn-action");
-const nextTurnStatusIndicator = document.getElementById("next-turn-status-indicator");
-// Estado de rastreamento de curva
-let hasAnnouncedCurrentTurn = false;
-let hasAnnouncedBrakingPoint = false;
-let lastNextTurnDist = -1;
-let lastNextTurnAngle = 0;
-let maxObservedLatG = 1.4; // Capacidade G lateral máxima padrão (se auto-calibra com a telemetria)
-const tyreFL = document.getElementById("tyre-fl");
-const tyreFR = document.getElementById("tyre-fr");
-const tyreRL = document.getElementById("tyre-rl");
-const tyreRR = document.getElementById("tyre-rr");
-// Setup Canvas G-G
-const canvas = document.getElementById("gg-canvas");
-const ctx = canvas.getContext("2d");
-function initGGCanvas() {
+(() => {
+  // overlay/state.ts
+  var state = {
+    // Session dynamic G limits (calibrated via telemetry)
+    maxObservedLatG: 1.4,
+    maxObservedDecelG: 1,
+    maxObservedAccelG: 0.5,
+    // Corner tracking state
+    inCorner: false,
+    cornerSamples: [],
+    currentCornerStartDist: -1,
+    currentCornerAngle: 0,
+    // Audio / Speech State
+    lastFeedbackTime: 0,
+    hasAnnouncedCurrentTurn: false,
+    hasAnnouncedBrakingPoint: false,
+    lastNextTurnDist: -1,
+    lastNextTurnAngle: 0
+  };
+
+  // overlay/config.ts
+  var WHEELBASE = 2.65;
+  var MAX_STEER_RAD = 0.45;
+  var SLIP_ANGLE_PEAK = 7;
+  var G_SCALE = 35;
+  var FEEDBACK_COOLDOWN = 8e3;
+  var AUDIO_ENABLED = false;
+
+  // overlay/gg-diagram.ts
+  var ggHistory = [];
+  var MAX_GG_HISTORY = 40;
+  var canvas = null;
+  var ctx = null;
+  function initGG() {
+    canvas = document.getElementById("gg-canvas");
+    if (canvas) {
+      ctx = canvas.getContext("2d");
+    }
+  }
+  function drawGGCanvas(currentAccX = 0, currentAccZ = 0) {
+    if (!canvas || !ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     const cx = canvas.width / 2;
     const cy = canvas.height / 2;
-    // Desenhar círculos de referência (1G, 1.5G)
     ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
     ctx.lineWidth = 1;
-    // 1G Circle
     ctx.beginPath();
-    ctx.arc(cx, cy, 1.0 * G_SCALE, 0, 2 * Math.PI);
+    ctx.arc(cx, cy, 1 * G_SCALE, 0, 2 * Math.PI);
     ctx.stroke();
-    // 1.5G Circle
     ctx.beginPath();
     ctx.arc(cx, cy, 1.5 * G_SCALE, 0, 2 * Math.PI);
     ctx.stroke();
-    // Eixos Cruzados
     ctx.strokeStyle = "rgba(255, 255, 255, 0.05)";
     ctx.beginPath();
     ctx.moveTo(0, cy);
@@ -65,298 +58,748 @@ function initGGCanvas() {
     ctx.moveTo(cx, 0);
     ctx.lineTo(cx, canvas.height);
     ctx.stroke();
-}
-function updateGGDiagram(accX, accZ) {
+    ctx.strokeStyle = "rgba(239, 68, 68, 0.22)";
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([2, 3]);
+    const rx = state.maxObservedLatG * G_SCALE;
+    const ryAccel = state.maxObservedAccelG * G_SCALE;
+    const ryDecel = state.maxObservedDecelG * G_SCALE;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ryAccel, 0, Math.PI, 2 * Math.PI);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ryDecel, 0, 0, Math.PI);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.35)";
+    ctx.font = "8px 'Outfit', sans-serif";
+    ctx.textAlign = "left";
+    const currentTotalG = Math.sqrt(currentAccX * currentAccX + currentAccZ * currentAccZ);
+    const maxPossibleG = currentAccZ < 0 ? Math.sqrt(state.maxObservedLatG * state.maxObservedLatG + state.maxObservedAccelG * state.maxObservedAccelG) : Math.sqrt(state.maxObservedLatG * state.maxObservedLatG + state.maxObservedDecelG * state.maxObservedDecelG);
+    const utilization = Math.min(100, Math.round(currentTotalG / Math.max(0.1, maxPossibleG) * 100));
+    ctx.fillText(`USO: ${utilization}%`, 6, canvas.height - 6);
+  }
+  function updateGGDiagram(accX, accZ) {
+    if (!canvas || !ctx) {
+      initGG();
+      if (!canvas || !ctx) return;
+    }
     const cx = canvas.width / 2;
     const cy = canvas.height / 2;
-    // Inverter o X porque forças G laterais são opostas ao sentido físico de curva
     const px = cx - accX * G_SCALE;
-    const py = cy + accZ * G_SCALE; // accZ negativo é aceleração, positivo é frenagem
-    // Adiciona ao histórico
+    const py = cy + accZ * G_SCALE;
     ggHistory.push({ x: px, y: py });
     if (ggHistory.length > MAX_GG_HISTORY) {
-        ggHistory.shift();
+      ggHistory.shift();
     }
-    // Redesenha a base
-    initGGCanvas();
-    // Desenha o rastro histórico (fading)
+    drawGGCanvas(accX, accZ);
     for (let i = 0; i < ggHistory.length; i++) {
-        const pt = ggHistory[i];
-        const alpha = (i / ggHistory.length) * 0.4;
-        ctx.fillStyle = `rgba(59, 130, 246, ${alpha})`;
-        ctx.beginPath();
-        ctx.arc(pt.x, pt.y, 2, 0, 2 * Math.PI);
-        ctx.fill();
+      const pt = ggHistory[i];
+      const alpha = i / ggHistory.length * 0.4;
+      ctx.fillStyle = `rgba(59, 130, 246, ${alpha})`;
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y, 2, 0, 2 * Math.PI);
+      ctx.fill();
     }
-    // Desenha o ponto atual em destaque
     ctx.fillStyle = "#60a5fa";
     ctx.shadowColor = "#3b82f6";
     ctx.shadowBlur = 8;
     ctx.beginPath();
     ctx.arc(px, py, 5, 0, 2 * Math.PI);
     ctx.fill();
-    ctx.shadowBlur = 0; // Reset
-}
-// Atualização de Cores dos Pneus baseados em Slip Angle
-function setTyreVisual(element, slipAngle) {
+    ctx.shadowBlur = 0;
+  }
+
+  // overlay/inputs-trace.ts
+  var inputHistory = [];
+  var MAX_INPUT_HISTORY = 120;
+  var traceCanvas = null;
+  var traceCtx = null;
+  function initTrace() {
+    traceCanvas = document.getElementById("trace-canvas");
+    if (traceCanvas) {
+      traceCtx = traceCanvas.getContext("2d");
+    }
+  }
+  function drawInputsTrace(throttle, brake, steer) {
+    if (!traceCanvas || !traceCtx) {
+      initTrace();
+      if (!traceCanvas || !traceCtx) return;
+    }
+    inputHistory.push({ throttle, brake, steer });
+    if (inputHistory.length > MAX_INPUT_HISTORY) {
+      inputHistory.shift();
+    }
+    traceCtx.clearRect(0, 0, traceCanvas.width, traceCanvas.height);
+    const w = traceCanvas.width;
+    const h = traceCanvas.height;
+    traceCtx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+    traceCtx.lineWidth = 1;
+    traceCtx.beginPath();
+    traceCtx.moveTo(0, h / 2);
+    traceCtx.lineTo(w, h / 2);
+    traceCtx.stroke();
+    traceCtx.strokeStyle = "rgba(59, 130, 246, 0.7)";
+    traceCtx.lineWidth = 1.2;
+    traceCtx.beginPath();
+    for (let i = 0; i < inputHistory.length; i++) {
+      const x = i / MAX_INPUT_HISTORY * w;
+      const val = inputHistory[i].steer;
+      const y = h / 2 + val * (h / 2 - 3);
+      if (i === 0) traceCtx.moveTo(x, y);
+      else traceCtx.lineTo(x, y);
+    }
+    traceCtx.stroke();
+    traceCtx.strokeStyle = "rgba(239, 68, 68, 0.85)";
+    traceCtx.lineWidth = 1.5;
+    traceCtx.beginPath();
+    for (let i = 0; i < inputHistory.length; i++) {
+      const x = i / MAX_INPUT_HISTORY * w;
+      const val = inputHistory[i].brake;
+      const y = h - val * (h - 6) - 3;
+      if (i === 0) traceCtx.moveTo(x, y);
+      else traceCtx.lineTo(x, y);
+    }
+    traceCtx.stroke();
+    traceCtx.strokeStyle = "rgba(16, 185, 129, 0.85)";
+    traceCtx.lineWidth = 1.5;
+    traceCtx.beginPath();
+    for (let i = 0; i < inputHistory.length; i++) {
+      const x = i / MAX_INPUT_HISTORY * w;
+      const val = inputHistory[i].throttle;
+      const y = h - val * (h - 6) - 3;
+      if (i === 0) traceCtx.moveTo(x, y);
+      else traceCtx.lineTo(x, y);
+    }
+    traceCtx.stroke();
+  }
+
+  // overlay/tyre-slip.ts
+  function setTyreVisual(element, slipAngle) {
     const absSlip = Math.abs(slipAngle);
     element.className = "tyre-indicator";
     if (absSlip > SLIP_ANGLE_PEAK * 1.4) {
-        element.classList.add("tyre-slip-high");
+      element.classList.add("tyre-slip-high");
+    } else if (absSlip > SLIP_ANGLE_PEAK * 0.9) {
+      element.classList.add("tyre-slip-mid");
+    } else if (absSlip > 1.5) {
+      element.classList.add("tyre-slip-low");
     }
-    else if (absSlip > SLIP_ANGLE_PEAK * 0.9) {
-        element.classList.add("tyre-slip-mid");
+  }
+  function checkSteeringScrub(speed, steer, slipFL, slipFR) {
+    const avgFrontSlip = (Math.abs(slipFL) + Math.abs(slipFR)) / 2;
+    const flEl = document.getElementById("tyre-fl");
+    const frEl = document.getElementById("tyre-fr");
+    if (flEl && frEl) {
+      flEl.classList.remove("tyre-scrub");
+      frEl.classList.remove("tyre-scrub");
+      if (speed > 4.5 && avgFrontSlip > SLIP_ANGLE_PEAK * 1.3 && Math.abs(steer) > 0.22) {
+        flEl.classList.add("tyre-scrub");
+        frEl.classList.add("tyre-scrub");
+      }
     }
-    else if (absSlip > 1.5) {
-        element.classList.add("tyre-slip-low");
-    }
-}
-// Envia feedback de áudio via Text-To-Speech (SpeechSynthesis) com opção de silenciamento de fala
-function speakFeedback(message, type, speak = true) {
+  }
+
+  // overlay/upcoming-turn.ts
+  var nextTurnDisplay = null;
+  var nextTurnArrow = null;
+  var nextTurnDistance = null;
+  var nextTurnTargetSpeed = null;
+  var nextTurnAction = null;
+  var nextTurnStatusIndicator = null;
+  var colorsPanel = null;
+  var scorecardOverlay = null;
+  var scorecardGrade = null;
+  var scorecardApexSpeed = null;
+  var scorecardTrailScore = null;
+  var scorecardApexTiming = null;
+  var scorecardGripUtil = null;
+  var coachPanel = null;
+  var coachMessage = null;
+  var scorecardTimeout = null;
+  function initUpcomingTurn() {
+    nextTurnDisplay = document.getElementById("next-turn-display");
+    nextTurnArrow = document.getElementById("next-turn-arrow");
+    nextTurnDistance = document.getElementById("next-turn-distance");
+    nextTurnTargetSpeed = document.getElementById("next-turn-target-speed");
+    nextTurnAction = document.getElementById("next-turn-action");
+    nextTurnStatusIndicator = document.getElementById("next-turn-status-indicator");
+    colorsPanel = document.getElementById("colors-panel");
+    scorecardOverlay = document.getElementById("scorecard-overlay");
+    scorecardGrade = document.getElementById("scorecard-grade");
+    scorecardApexSpeed = document.getElementById("scorecard-apex-speed");
+    scorecardTrailScore = document.getElementById("scorecard-trail-score");
+    scorecardApexTiming = document.getElementById("scorecard-apex-timing");
+    scorecardGripUtil = document.getElementById("scorecard-grip-util");
+    coachPanel = document.getElementById("coach-panel");
+    coachMessage = document.getElementById("coach-message");
+  }
+  function speakFeedback(message, type, speak = true) {
+    if (!coachPanel || !coachMessage) return false;
     const now = Date.now();
-    if (speak && AUDIO_ENABLED && (now - lastFeedbackTime < FEEDBACK_COOLDOWN))
-        return false;
-    // Define as classes visuais do painel do coach
+    if (speak && AUDIO_ENABLED && now - state.lastFeedbackTime < FEEDBACK_COOLDOWN) return false;
     coachPanel.className = "";
-    if (type === "warning")
-        coachPanel.classList.add("coach-warning");
-    else if (type === "danger")
-        coachPanel.classList.add("coach-danger");
-    else if (type === "success")
-        coachPanel.classList.add("coach-success");
-    else
-        coachPanel.className = "coach-neutral";
+    if (type === "warning") coachPanel.classList.add("coach-warning");
+    else if (type === "danger") coachPanel.classList.add("coach-danger");
+    else if (type === "success") coachPanel.classList.add("coach-success");
+    else coachPanel.className = "coach-neutral";
     coachMessage.innerText = message;
-    // Utiliza a Web Speech API para dar voz ao Engenheiro de Corrida apenas se solicitado e áudio habilitado
-    if (speak && AUDIO_ENABLED && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel(); // Cancela áudios pendentes
-        const utterance = new SpeechSynthesisUtterance(message);
-        utterance.lang = "pt-BR";
-        utterance.rate = 1.0;
-        utterance.pitch = 0.9;
-        window.speechSynthesis.speak(utterance);
-        lastFeedbackTime = now;
+    if (speak && AUDIO_ENABLED && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(message);
+      utterance.lang = "pt-BR";
+      utterance.rate = 1;
+      utterance.pitch = 0.9;
+      window.speechSynthesis.speak(utterance);
+      state.lastFeedbackTime = now;
     }
     return true;
-}
-// Motor de Análise Física (Heurísticas)
-function analyzePhysics(data) {
+  }
+  function analyzePhysics(data) {
+    if (!coachMessage || !coachPanel) return;
     const speed = data.speedMs;
-    const steer = data.steer; // -1 a 1
-    const yawRate = data.yawRate; // rad/s
+    const steer = data.steer;
+    const yawRate = data.yawRate;
     const brake = data.brake;
     const throttle = data.throttle;
-    // Ângulo de esterço nas rodas em radianos
     const steerRad = steer * MAX_STEER_RAD;
-    // Slip angles dos pneus em graus
     const slipFL = data.tyres[0].slipAngle;
     const slipFR = data.tyres[1].slipAngle;
     const slipRL = data.tyres[2].slipAngle;
     const slipRR = data.tyres[3].slipAngle;
     const avgFrontSlip = (Math.abs(slipFL) + Math.abs(slipFR)) / 2;
     const avgRearSlip = (Math.abs(slipRL) + Math.abs(slipRR)) / 2;
-    // 1. Heurística de Entrada Excessiva (Velocidade)
     if (speed > 15 && avgFrontSlip > SLIP_ANGLE_PEAK * 1.3 && brake > 0.1) {
-        speakFeedback("Entrada rápida demais! Alivie a pressão no freio para recuperar aderência.", "danger");
-        return;
+      speakFeedback("Entrada r\xE1pida demais! Alivie a press\xE3o no freio para recuperar ader\xEAncia.", "danger");
+      return;
     }
-    // 2. Heurística de Understeer (Subesterço)
     if (speed > 8 && Math.abs(steer) > 0.15) {
-        // Cálculo do Yaw Esperado (Ackermann)
-        const expectedYawRaw = (speed * steerRad) / WHEELBASE;
-        // Cap físico do Yaw rate dinâmico baseado na aceleração lateral máxima aproximada (~1.35G)
-        const maxPhysicalYaw = (1.35 * 9.81 * Math.max(0.1, data.roadGrip)) / Math.max(speed, 1.0);
-        const expectedYaw = Math.min(Math.abs(expectedYawRaw), maxPhysicalYaw) * Math.sign(steerRad);
-        const yawDelta = Math.abs(expectedYaw) - Math.abs(yawRate);
-        // Se o carro vira menos do que deveria, os pneus dianteiros estão deslizando além do pico,
-        // e o escorregamento dianteiro é superior ao traseiro (para evitar falsos positivos de sobresterço/tração)
-        if (yawDelta > 0.15 && avgFrontSlip > SLIP_ANGLE_PEAK * 1.2 && avgFrontSlip > avgRearSlip) {
-            speakFeedback("Subesterço! Reduza o ângulo de esterço.", "warning");
-            return;
-        }
+      const expectedYawRaw = speed * steerRad / WHEELBASE;
+      const maxPhysicalYaw = 1.35 * 9.81 * Math.max(0.1, data.roadGrip) / Math.max(speed, 1);
+      const expectedYaw = Math.min(Math.abs(expectedYawRaw), maxPhysicalYaw) * Math.sign(steerRad);
+      const yawDelta = Math.abs(expectedYaw) - Math.abs(yawRate);
+      if (yawDelta > 0.15 && avgFrontSlip > SLIP_ANGLE_PEAK * 1.2 && avgFrontSlip > avgRearSlip) {
+        speakFeedback("Subester\xE7o! Reduza o \xE2ngulo de ester\xE7o.", "warning");
+        return;
+      }
     }
-    // 3. Heurística de Oversteer (Sobresterço / Traseira Escorregando)
     if (Math.abs(yawRate) > 0.15 && speed > 10) {
-        // Contra-esterço: esterçando no sentido contrário da guinada
-        const counterSteer = Math.sign(steer) !== Math.sign(yawRate);
-        if (counterSteer && avgRearSlip > SLIP_ANGLE_PEAK * 1.2) {
-            speakFeedback("Sobresterço! Mantenha o contra-esterço controlado.", "danger");
-            return;
-        }
+      const counterSteer = Math.sign(steer) !== Math.sign(yawRate);
+      if (counterSteer && avgRearSlip > SLIP_ANGLE_PEAK * 1.2) {
+        speakFeedback("Sobrester\xE7o! Mantenha o contra-ester\xE7o controlado.", "danger");
+        return;
+      }
     }
-    // 4. Heurística de Trail Braking
     if (brake > 0.05 && Math.abs(steer) > 0.2) {
-        if (brake > 0.6) {
-            speakFeedback("Sobrecarga de frenagem! Alivie o freio na entrada da curva.", "warning", false); // Apenas visual
-            return;
-        }
-        else if (brake < 0.2 && brake > 0.05) {
-            speakFeedback("Belo Trail Braking. Segure o nariz do carro até o ápice.", "success", false); // Apenas visual
-            return;
-        }
+      if (brake > 0.6) {
+        speakFeedback("Sobrecarga de frenagem! Alivie o freio na entrada da curva.", "warning", false);
+        return;
+      } else if (brake < 0.2 && brake > 0.05) {
+        speakFeedback("Belo Trail Braking. Segure o nariz do carro at\xE9 o \xE1pice.", "success", false);
+        return;
+      }
     }
-    // 5. Heurística de Aceleração Precoce
     if (throttle > 0.5 && Math.abs(steer) > 0.3 && speed < 30) {
-        if (avgRearSlip > SLIP_ANGLE_PEAK * 0.8) {
-            speakFeedback("Patinando na tração! Suavize a aplicação de aceleração.", "warning");
-            return;
-        }
+      if (avgRearSlip > SLIP_ANGLE_PEAK * 0.8) {
+        speakFeedback("Patinando na tra\xE7\xE3o! Suavize a aplica\xE7\xE3o de acelera\xE7\xE3o.", "warning");
+        return;
+      }
     }
-    // Feedback padrão
+    const slipRatioFL = data.tyres[0].slipRatio;
+    const slipRatioFR = data.tyres[1].slipRatio;
+    const slipRatioRL = data.tyres[2].slipRatio;
+    const slipRatioRR = data.tyres[3].slipRatio;
+    if (brake > 0.15) {
+      if (slipRatioFL < -0.22 || slipRatioFR < -0.22) {
+        speakFeedback("Travando rodas dianteiras! Alivie o freio para n\xE3o passar reto.", "danger", false);
+        return;
+      }
+      if (slipRatioRL < -0.22 || slipRatioRR < -0.22) {
+        speakFeedback("Travando rodas traseiras! Risco de rodar, alivie o freio.", "danger", false);
+        return;
+      }
+    }
     if (speed > 5) {
-        coachMessage.innerText = "Pilotagem limpa. Mantenha os olhos nos pontos de frenagem.";
-        coachPanel.className = "coach-neutral";
+      coachMessage.innerText = "Pilotagem limpa. Mantenha os olhos nos pontos de frenagem.";
+      coachPanel.className = "coach-neutral";
     }
-}
-console.log("[Overlay] app.js loaded successfully!");
-// Lógica de Atualização Visual e por Voz da Próxima Curva
-function updateUpcomingTurn(data) {
+  }
+  function updateUpcomingTurn(data) {
+    if (!nextTurnDistance || !nextTurnArrow || !nextTurnDisplay || !nextTurnStatusIndicator || !nextTurnTargetSpeed || !nextTurnAction) {
+      initUpcomingTurn();
+      if (!nextTurnDistance || !nextTurnArrow || !nextTurnDisplay || !nextTurnStatusIndicator || !nextTurnTargetSpeed || !nextTurnAction) return;
+    }
     const dist = data.nextTurnDist;
     const angle = data.nextTurnAngle;
-    // Se a distância for inválida ou menor/igual a zero, mostra valores neutros (sem ocultar o widget)
     if (dist <= 0) {
-        nextTurnDistance.innerText = "--m";
-        nextTurnArrow.innerText = "↩️";
-        nextTurnDisplay.className = "panel-glass";
-        nextTurnStatusIndicator.className = "status-neutral";
-        nextTurnTargetSpeed.innerText = "Ideal: -- km/h";
-        nextTurnAction.innerText = "MANTENHA VELOCIDADE";
-        hasAnnouncedCurrentTurn = false;
-        hasAnnouncedBrakingPoint = false;
-        lastNextTurnDist = dist;
-        lastNextTurnAngle = angle;
-        return;
+      nextTurnDistance.innerText = "--m";
+      nextTurnArrow.innerText = "\u21A9\uFE0F";
+      nextTurnDisplay.className = "panel-glass";
+      nextTurnStatusIndicator.className = "status-neutral";
+      nextTurnTargetSpeed.innerText = "Ideal: -- km/h";
+      nextTurnAction.innerText = "MANTENHA VELOCIDADE";
+      if (colorsPanel) colorsPanel.className = "state-neutral";
+      state.hasAnnouncedCurrentTurn = false;
+      state.hasAnnouncedBrakingPoint = false;
+      state.lastNextTurnDist = dist;
+      state.lastNextTurnAngle = angle;
+      return;
     }
-    // Detecta transição para uma nova curva
-    const distIncreased = dist > lastNextTurnDist + 50;
-    const angleChanged = Math.abs(angle - lastNextTurnAngle) > 20;
+    const distIncreased = dist > state.lastNextTurnDist + 50;
+    const angleChanged = Math.abs(angle - state.lastNextTurnAngle) > 20;
     if (distIncreased || angleChanged) {
-        hasAnnouncedCurrentTurn = false;
-        hasAnnouncedBrakingPoint = false;
+      state.hasAnnouncedCurrentTurn = false;
+      state.hasAnnouncedBrakingPoint = false;
     }
-    lastNextTurnDist = dist;
-    lastNextTurnAngle = angle;
-    // Atualiza o widget visual com a distância
+    state.lastNextTurnDist = dist;
+    state.lastNextTurnAngle = angle;
     nextTurnDistance.innerText = `${Math.round(dist)}m`;
-    // Direção da curva (corrigido: positivo = direita, negativo = esquerda)
     const isRight = angle > 0;
-    if (isRight) {
-        nextTurnArrow.innerText = "➡️";
-    }
-    else {
-        nextTurnArrow.innerText = "⬅️";
-    }
-    // --- LÓGICA DE VELOCIDADE DE ENTRADA (Cálculo Físico-Dinâmico) ---
-    const speed = data.speedMs; // velocidade atual em m/s
+    nextTurnArrow.innerText = isRight ? "\u27A1\uFE0F" : "\u2B05\uFE0F";
+    const speed = data.speedMs;
     const absAngle = Math.abs(angle);
-    // Estimativa contínua e realista da velocidade ideal (km/h) baseada na angulação da curva
-    // Usamos a fórmula baseada no limite físico de contorno de curva
-    let baseTargetKmh = 800 / Math.sqrt(Math.max(1.0, absAngle));
-    // Limita os extremos de velocidade alvo para curvas muito abertas ou fechadas
+    let baseTargetKmh = 800 / Math.sqrt(Math.max(1, absAngle));
     baseTargetKmh = Math.max(50, Math.min(290, baseTargetKmh));
-    // Multiplicadores físicos:
-    // 1. Grip da pista (velocidade proporcional à raiz do grip)
     const gripFactor = Math.sqrt(Math.max(0.1, data.roadGrip));
-    // 2. Capacidade dinâmica do veículo (calculada com base no G lateral máximo observado)
-    const carPerformanceFactor = Math.sqrt(maxObservedLatG / 1.4);
+    const carPerformanceFactor = Math.min(1.25, Math.sqrt(state.maxObservedLatG / 1.4));
     let vTargetKmh = baseTargetKmh * gripFactor * carPerformanceFactor;
-    // 3. Penalidade por posicionamento incorreto de entrada na curva (aplica-se apenas perto da curva < 60m)
-    const pLat = data.trackPosLat; // -1.0 = esquerda, 1.0 = direita
+    const pLat = data.trackPosLat;
     const wrongSideFactor = isRight ? pLat : -pLat;
     if (dist < 60 && wrongSideFactor > 0) {
-        const proximityScale = (60 - dist) / 60;
-        vTargetKmh = vTargetKmh * (1.0 - 0.2 * wrongSideFactor * proximityScale);
+      const proximityScale = (60 - dist) / 60;
+      vTargetKmh = vTargetKmh * (1 - 0.2 * wrongSideFactor * proximityScale);
     }
-    // Velocidade alvo convertida para m/s para os cálculos de física
     const vTarget = vTargetKmh / 3.6;
-    // Atualiza a velocidade ideal na placa
     nextTurnTargetSpeed.innerText = `Ideal: ${Math.round(vTargetKmh)} km/h`;
-    // Desaceleração necessária para chegar na velocidade alvo da curva (v^2 = u^2 + 2ad => a = (v^2 - u^2) / 2d)
+    const targetDecelMs2 = state.maxObservedDecelG * 9.81 * 0.8 * Math.max(0.5, data.roadGrip);
+    const reactionTime = 0.3;
+    const reactionDistance = speed * reactionTime;
+    let physicalBrakingDistance = 0;
+    if (speed > vTarget) {
+      physicalBrakingDistance = (speed * speed - vTarget * vTarget) / (2 * targetDecelMs2);
+    }
+    const totalBrakingDistanceNeeded = physicalBrakingDistance + reactionDistance;
     let aReq = 0;
     if (speed > vTarget) {
-        aReq = (speed * speed - vTarget * vTarget) / (2 * Math.max(1.0, dist));
+      aReq = (speed * speed - vTarget * vTarget) / (2 * Math.max(1, dist));
     }
-    // Deceleração real do veículo estimada (accG.z negativo é desaceleração física)
     const aActual = Math.max(0, -data.accG.z * 9.81);
     const isBraking = data.brake > 0.15;
     const isBrakingSufficiently = isBraking && (data.brake > 0.4 || aActual >= aReq - 1.5);
-    // Define os estilos visuais de acordo com o status
-    if (aReq <= 3.5) {
-        // Velocidade segura
-        nextTurnDisplay.className = "panel-glass next-turn-safe";
-        nextTurnStatusIndicator.className = "status-safe";
-        nextTurnAction.innerText = "VELOCIDADE OK";
+    let frontLocked = false;
+    let rearLocked = false;
+    if (data.brake > 0.15) {
+      if (data.tyres[0].slipRatio < -0.22 || data.tyres[1].slipRatio < -0.22) {
+        frontLocked = true;
+      }
+      if (data.tyres[2].slipRatio < -0.22 || data.tyres[3].slipRatio < -0.22) {
+        rearLocked = true;
+      }
     }
-    else if (aReq <= 7.5) {
-        // Velocidade limítrofe (atenção, zona de aproximação)
-        nextTurnDisplay.className = "panel-glass next-turn-warning";
-        nextTurnStatusIndicator.className = "status-warning";
-        nextTurnAction.innerText = "PREPARE-SE";
-    }
-    else {
-        // Zona de frenagem necessária (aReq > 7.5)
-        if (isBrakingSufficiently) {
-            // Piloto já está freando o suficiente
-            nextTurnDisplay.className = "panel-glass next-turn-braking";
-            nextTurnStatusIndicator.className = "status-braking";
-            nextTurnAction.innerText = "FRENAGEM OK";
+    if (speed > 10 && speed < vTarget - 5 && dist < 100) {
+      nextTurnDisplay.className = "panel-glass next-turn-safe";
+      if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-safe";
+      nextTurnAction.innerText = "ACELERE!";
+      if (colorsPanel) colorsPanel.className = "state-safe";
+    } else if (dist > totalBrakingDistanceNeeded + 25) {
+      nextTurnDisplay.className = "panel-glass next-turn-safe";
+      if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-safe";
+      nextTurnAction.innerText = "VELOCIDADE OK";
+      if (colorsPanel) colorsPanel.className = "state-safe";
+    } else if (dist > totalBrakingDistanceNeeded) {
+      nextTurnDisplay.className = "panel-glass next-turn-warning";
+      if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-warning";
+      nextTurnAction.innerText = "PREPARE-SE";
+      if (colorsPanel) colorsPanel.className = "state-warning";
+    } else {
+      if (frontLocked) {
+        nextTurnDisplay.className = "panel-glass next-turn-danger";
+        if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-danger";
+        nextTurnAction.innerText = "TRAVANDO FRENTE!";
+        if (colorsPanel) colorsPanel.className = "state-danger";
+      } else if (rearLocked) {
+        nextTurnDisplay.className = "panel-glass next-turn-danger";
+        if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-danger";
+        nextTurnAction.innerText = "TRAVANDO TRASEIRA!";
+        if (colorsPanel) colorsPanel.className = "state-danger";
+      } else if (isBrakingSufficiently) {
+        nextTurnDisplay.className = "panel-glass next-turn-braking";
+        if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-braking";
+        nextTurnAction.innerText = "FRENAGEM OK";
+        if (colorsPanel) colorsPanel.className = "state-braking";
+      } else {
+        nextTurnDisplay.className = "panel-glass next-turn-danger";
+        if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-danger";
+        nextTurnAction.innerText = "FREIE AGORA!";
+        if (colorsPanel) colorsPanel.className = "state-danger";
+        if (!state.hasAnnouncedBrakingPoint) {
+          if (speakFeedback("Freie!", "danger")) {
+            state.hasAnnouncedBrakingPoint = true;
+          }
         }
-        else {
-            // Rápido demais, precisa começar a frear
-            nextTurnDisplay.className = "panel-glass next-turn-danger";
-            nextTurnStatusIndicator.className = "status-danger";
-            nextTurnAction.innerText = "FREIE AGORA!";
-            // Alerta sonoro apenas no momento de entrar na zona de perigo de frenagem (1x por curva)
-            if (!hasAnnouncedBrakingPoint) {
-                if (speakFeedback("Freie!", "danger")) {
-                    hasAnnouncedBrakingPoint = true;
-                }
-            }
-        }
+      }
     }
-}
-let updateCount = 0;
-// Ponto de Entrada da Telemetria (Chamado a partir do CSP Lua)
-window.onTelemetryUpdate = function (data) {
+  }
+  function processCornerStats() {
+    if (state.cornerSamples.length < 5) return;
+    if (!scorecardOverlay || !scorecardGrade || !scorecardApexSpeed || !scorecardTrailScore || !scorecardApexTiming || !scorecardGripUtil) {
+      initUpcomingTurn();
+      if (!scorecardOverlay || !scorecardGrade || !scorecardApexSpeed || !scorecardTrailScore || !scorecardApexTiming || !scorecardGripUtil) return;
+    }
+    const speedKmhList = state.cornerSamples.map((s) => s.speedMs * 3.6);
+    const minSpeedKmh = Math.min(...speedKmhList);
+    let baseTargetKmh = 800 / Math.sqrt(Math.max(1, Math.abs(state.currentCornerAngle)));
+    baseTargetKmh = Math.max(50, Math.min(290, baseTargetKmh));
+    const gripFactor = Math.sqrt(Math.max(0.1, state.cornerSamples[0].roadGrip));
+    const carPerformanceFactor = Math.min(1.25, Math.sqrt(state.maxObservedLatG / 1.4));
+    const targetKmh = baseTargetKmh * gripFactor * carPerformanceFactor;
+    const speedDiff = minSpeedKmh - targetKmh;
+    let speedScore = 100;
+    if (speedDiff < 0) {
+      speedScore = Math.max(0, 100 - Math.abs(speedDiff) * 4.5);
+    } else {
+      speedScore = Math.max(0, 100 - Math.abs(speedDiff) * 2.5);
+    }
+    let trailBrakingSamples = 0;
+    let perfectTrailSamples = 0;
+    let highBrakeSteerSamples = 0;
+    let earlyRelease = true;
+    state.cornerSamples.forEach((s) => {
+      if (Math.abs(s.steer) > 0.15) {
+        if (s.brake > 0.05) {
+          earlyRelease = false;
+          trailBrakingSamples++;
+          if (s.brake <= 0.3) {
+            perfectTrailSamples++;
+          } else {
+            highBrakeSteerSamples++;
+          }
+        }
+      }
+    });
+    let trailScore = 0;
+    if (earlyRelease) {
+      trailScore = 35;
+    } else if (trailBrakingSamples > 0) {
+      const perfectRatio = perfectTrailSamples / trailBrakingSamples;
+      const highBrakeRatio = highBrakeSteerSamples / trailBrakingSamples;
+      trailScore = Math.round(50 + 55 * perfectRatio - 35 * highBrakeRatio);
+      trailScore = Math.max(0, Math.min(100, trailScore));
+    } else {
+      trailScore = 100;
+    }
+    let apexTimingText = "Ideal";
+    const minSpeedIndex = state.cornerSamples.findIndex((s) => s.speedMs * 3.6 === minSpeedKmh);
+    const pct = minSpeedIndex / state.cornerSamples.length;
+    const insideDirection = state.currentCornerAngle > 0 ? 1 : -1;
+    const maxInsideDev = Math.max(...state.cornerSamples.map((s) => s.trackPosLat * insideDirection));
+    if (maxInsideDev < 0.45) {
+      apexTimingText = "Longe do \xC1pice";
+    } else if (pct < 0.28) {
+      apexTimingText = "\xC1pice Cedo";
+    } else if (pct > 0.72) {
+      apexTimingText = "\xC1pice Atrasado";
+    } else {
+      apexTimingText = "Perfeito";
+    }
+    let totalEff = 0;
+    state.cornerSamples.forEach((s) => {
+      const g = Math.sqrt(s.accG.x * s.accG.x + s.accG.z * s.accG.z);
+      const eff = g / state.maxObservedLatG;
+      totalEff += eff;
+    });
+    const avgGripUtil = Math.round(totalEff / state.cornerSamples.length * 100);
+    const finalGripUtil = Math.min(100, Math.max(0, avgGripUtil));
+    const gripScore = Math.min(100, finalGripUtil / 85 * 100);
+    const finalScore = Math.round(speedScore * 0.4 + trailScore * 0.3 + gripScore * 0.3);
+    let grade = "C";
+    let gradeClass = "grade-blue";
+    if (finalScore >= 95) {
+      grade = "S";
+      gradeClass = "grade-gold";
+    } else if (finalScore >= 88) {
+      grade = "A+";
+      gradeClass = "grade-green";
+    } else if (finalScore >= 80) {
+      grade = "A";
+      gradeClass = "grade-green";
+    } else if (finalScore >= 70) {
+      grade = "B";
+      gradeClass = "grade-blue";
+    } else if (finalScore >= 60) {
+      grade = "C";
+      gradeClass = "grade-blue";
+    } else {
+      grade = "D";
+      gradeClass = "grade-red";
+    }
+    scorecardGrade.innerText = grade;
+    scorecardGrade.className = gradeClass;
+    scorecardApexSpeed.innerText = `${Math.round(minSpeedKmh)} km/h (Ideal: ${Math.round(targetKmh)})`;
+    scorecardTrailScore.innerText = `${Math.round(trailScore)}%`;
+    scorecardApexTiming.innerText = apexTimingText;
+    scorecardGripUtil.innerText = `${Math.round(finalGripUtil)}%`;
+    scorecardOverlay.classList.remove("scorecard-hidden");
+    if (scorecardTimeout) clearTimeout(scorecardTimeout);
+    scorecardTimeout = setTimeout(() => {
+      if (scorecardOverlay) {
+        scorecardOverlay.classList.add("scorecard-hidden");
+      }
+    }, 4500);
+  }
+
+  // overlay/app.ts
+  var mode = window.location.hash ? window.location.hash.substring(1) : "full";
+  document.body.className = `mode-${mode}`;
+  console.log(`[Overlay] Initialized in mode: ${mode}`);
+  var speedIndicator = null;
+  var gearIndicator = null;
+  var rpmBar = null;
+  var throttleBar = null;
+  var brakeBar = null;
+  var trackPosTarget = null;
+  var trackPosCar = null;
+  var tyreFL = null;
+  var tyreFR = null;
+  var tyreRL = null;
+  var tyreRR = null;
+  function initDOM() {
+    speedIndicator = document.getElementById("speed-indicator");
+    gearIndicator = document.getElementById("gear-indicator");
+    rpmBar = document.getElementById("rpm-bar");
+    throttleBar = document.getElementById("throttle-bar");
+    brakeBar = document.getElementById("brake-bar");
+    trackPosTarget = document.getElementById("track-pos-target");
+    trackPosCar = document.getElementById("track-pos-car");
+    tyreFL = document.getElementById("tyre-fl");
+    tyreFR = document.getElementById("tyre-fr");
+    tyreRL = document.getElementById("tyre-rl");
+    tyreRR = document.getElementById("tyre-rr");
+    initGG();
+    initTrace();
+    initUpcomingTurn();
+  }
+  function updateTrackPositionWidget(data) {
+    if (!trackPosTarget || !trackPosCar) return;
+    const dist = data.nextTurnDist;
+    const angle = data.nextTurnAngle;
+    const currentPos = data.trackPosLat;
+    const carLeftPct = (currentPos + 1) / 2 * 100;
+    trackPosCar.style.left = `${Math.max(2, Math.min(98, carLeftPct))}%`;
+    let targetPos = 0;
+    if (dist > 0 && dist < 90) {
+      const isRight = angle > 0;
+      const apexSide = isRight ? 0.85 : -0.85;
+      const outsideSide = isRight ? -0.9 : 0.9;
+      if (dist > 50) {
+        targetPos = outsideSide;
+      } else if (dist > 15) {
+        const ratio = (dist - 15) / 35;
+        targetPos = apexSide + (outsideSide - apexSide) * ratio;
+      } else {
+        targetPos = apexSide;
+      }
+    } else if (state.inCorner && state.cornerSamples.length > 0) {
+      const isRight = state.currentCornerAngle > 0;
+      targetPos = isRight ? -0.8 : 0.8;
+    }
+    const targetLeftPct = (targetPos + 1) / 2 * 100;
+    trackPosTarget.style.left = `${Math.max(2, Math.min(98, targetLeftPct))}%`;
+  }
+  var updateCount = 0;
+  window.onTelemetryUpdate = function(data) {
     if (!data) {
-        console.warn("[Overlay] Received empty telemetry data");
-        return;
+      console.warn("[Overlay] Received empty telemetry data");
+      return;
+    }
+    if (updateCount === 0) {
+      initDOM();
     }
     updateCount++;
-    // Atualiza a capacidade lateral G máxima observada do veículo (com limite de segurança de 6G para colisões)
     const currentLatG = Math.abs(data.accG.x);
-    if (currentLatG > maxObservedLatG && currentLatG < 6.0) {
-        maxObservedLatG = currentLatG;
+    if (currentLatG > state.maxObservedLatG && currentLatG < 2) {
+      state.maxObservedLatG = currentLatG;
+    }
+    const currentDecelG = -data.accG.z;
+    if (currentDecelG > state.maxObservedDecelG && currentDecelG < 1.6 && data.brake > 0.8) {
+      state.maxObservedDecelG = currentDecelG;
+    }
+    const currentAccelG = data.accG.z;
+    if (currentAccelG > state.maxObservedAccelG && currentAccelG < 1 && data.throttle > 0.8) {
+      state.maxObservedAccelG = currentAccelG;
     }
     if (updateCount % 60 === 1) {
-        console.log(`[Overlay] Telemetry update #${updateCount} received. Speed: ${data.speedKmh.toFixed(1)} km/h, Gear: ${data.gear}, RPM: ${Math.round(data.engineRPM)}`);
+      console.log(`[Overlay] Telemetry update #${updateCount} received. Speed: ${data.speedKmh.toFixed(1)} km/h, Gear: ${data.gear}, RPM: ${Math.round(data.engineRPM)}`);
     }
-    // Atualizar Velocidade e Marcha
-    speedIndicator.innerText = Math.round(data.speedKmh).toString();
-    const gear = data.gear;
-    if (gear === -1)
-        gearIndicator.innerText = "R";
-    else if (gear === 0)
-        gearIndicator.innerText = "N";
-    else
-        gearIndicator.innerText = gear.toString();
-    // Acelerador e Freio
-    throttleBar.style.width = `${Math.min(data.throttle * 100, 100)}%`;
-    brakeBar.style.width = `${Math.min(data.brake * 100, 100)}%`;
-    // Barra de RPM
-    const rpmPercent = (data.engineRPM / 8500) * 100;
-    rpmBar.style.width = `${Math.min(rpmPercent, 100)}%`;
-    // Visual do Pneus (FL: 0, FR: 1, RL: 2, RR: 3)
-    setTyreVisual(tyreFL, data.tyres[0].slipAngle);
-    setTyreVisual(tyreFR, data.tyres[1].slipAngle);
-    setTyreVisual(tyreRL, data.tyres[2].slipAngle);
-    setTyreVisual(tyreRR, data.tyres[3].slipAngle);
-    // G-G Diagram
+    if (speedIndicator) {
+      speedIndicator.innerText = Math.round(data.speedKmh).toString();
+    }
+    if (gearIndicator) {
+      const gear = data.gear;
+      if (gear === -1) gearIndicator.innerText = "R";
+      else if (gear === 0) gearIndicator.innerText = "N";
+      else gearIndicator.innerText = gear.toString();
+    }
+    if (throttleBar) {
+      throttleBar.style.width = `${Math.min(data.throttle * 100, 100)}%`;
+    }
+    if (brakeBar) {
+      brakeBar.style.width = `${Math.min(data.brake * 100, 100)}%`;
+    }
+    if (rpmBar) {
+      const rpmPercent = data.engineRPM / 8500 * 100;
+      rpmBar.style.width = `${Math.min(rpmPercent, 100)}%`;
+    }
+    if (tyreFL) setTyreVisual(tyreFL, data.tyres[0].slipAngle);
+    if (tyreFR) setTyreVisual(tyreFR, data.tyres[1].slipAngle);
+    if (tyreRL) setTyreVisual(tyreRL, data.tyres[2].slipAngle);
+    if (tyreRR) setTyreVisual(tyreRR, data.tyres[3].slipAngle);
     updateGGDiagram(data.accG.x, data.accG.z);
-    // Atualizar widget e coaching da próxima curva
     updateUpcomingTurn(data);
-    // Executar análises e feedback
     analyzePhysics(data);
-};
-// Inicialização
-initGGCanvas();
+    drawInputsTrace(data.throttle, data.brake, data.steer);
+    updateTrackPositionWidget(data);
+    checkSteeringScrub(data.speedMs, data.steer, data.tyres[0].slipAngle, data.tyres[1].slipAngle);
+    const dist = data.nextTurnDist;
+    const angle = data.nextTurnAngle;
+    if (dist > 0 && dist < 80) {
+      if (!state.inCorner) {
+        state.inCorner = true;
+        state.cornerSamples = [];
+        state.currentCornerStartDist = dist;
+        state.currentCornerAngle = angle;
+      }
+      state.cornerSamples.push({
+        speedMs: data.speedMs,
+        roadGrip: data.roadGrip,
+        accG: { x: data.accG.x, z: data.accG.z },
+        brake: data.brake,
+        steer: data.steer,
+        trackPosLat: data.trackPosLat
+      });
+    } else if (state.inCorner && (dist <= 0 || dist > state.currentCornerStartDist + 50)) {
+      state.inCorner = false;
+      processCornerStats();
+    }
+  };
+  function startMockSimulation() {
+    console.log("[Overlay] Iniciando Simulador de Telemetria Integrado...");
+    let mockDistance = 0;
+    let mockSpeedMs = 60;
+    let mockSteer = 0;
+    let mockThrottle = 1;
+    let mockBrake = 0;
+    let mockGear = 5;
+    let mockRPM = 6e3;
+    setInterval(() => {
+      mockDistance += mockSpeedMs * 0.0167;
+      if (mockDistance > 800) {
+        mockDistance = 0;
+        mockSpeedMs = 50;
+        mockGear = 4;
+      }
+      let nextTurnDist = -1;
+      let nextTurnAngle = 65;
+      let trackPosLat = 0;
+      let accX = 0;
+      let accZ = 0;
+      const tyres = [
+        { slipAngle: 0, slipRatio: 0, load: 5e3, ndSlip: 0 },
+        { slipAngle: 0, slipRatio: 0, load: 5e3, ndSlip: 0 },
+        { slipAngle: 0, slipRatio: 0, load: 4e3, ndSlip: 0 },
+        { slipAngle: 0, slipRatio: 0, load: 4e3, ndSlip: 0 }
+      ];
+      if (mockDistance < 250) {
+        mockThrottle = 1;
+        mockBrake = 0;
+        mockSteer = 0;
+        mockSpeedMs += 0.35;
+        if (mockSpeedMs > 66) mockSpeedMs = 66;
+        mockGear = 5;
+        mockRPM = 4e3 + (mockSpeedMs - 50) * 150;
+        trackPosLat = -0.6;
+        accZ = -0.3;
+      } else if (mockDistance >= 250 && mockDistance < 370) {
+        nextTurnDist = 370 - mockDistance;
+        trackPosLat = -0.88;
+        if (nextTurnDist > 65) {
+          mockThrottle = 1;
+          mockBrake = 0;
+          accZ = -0.1;
+        } else if (nextTurnDist > 15) {
+          mockThrottle = 0;
+          const brakeProgress = (nextTurnDist - 15) / 50;
+          mockBrake = 0.15 + brakeProgress * 0.75;
+          mockSteer = (1 - brakeProgress) * 0.44;
+          mockSpeedMs -= 0.65;
+          if (mockSpeedMs < 24) mockSpeedMs = 24;
+          mockGear = 3;
+          mockRPM = 5200 - (65 - nextTurnDist) * 35;
+          accZ = mockBrake * 1.1;
+          accX = mockSteer * 2.4;
+          tyres[0].slipAngle = -mockSteer * 14;
+          tyres[1].slipAngle = -mockSteer * 12;
+          tyres[0].slipRatio = -mockBrake * 0.15;
+        } else {
+          mockThrottle = 0.15;
+          mockBrake = 0.08;
+          mockSteer = 0.49;
+          mockSpeedMs = 23.5;
+          mockRPM = 4600;
+          mockGear = 2;
+          trackPosLat = 0.82;
+          accX = 1.39;
+          accZ = 0.08;
+          tyres[0].slipAngle = -9.6;
+          tyres[1].slipAngle = -8.2;
+        }
+      } else if (mockDistance >= 370 && mockDistance < 500) {
+        nextTurnDist = -1;
+        const exitProgress = Math.min(1, (mockDistance - 370) / 130);
+        mockThrottle = 0.3 + exitProgress * 0.7;
+        mockBrake = 0;
+        mockSteer = 0.49 * (1 - exitProgress);
+        mockSpeedMs += 0.28;
+        mockGear = 3;
+        mockRPM = 4200 + exitProgress * 1800;
+        trackPosLat = 0.82 - exitProgress * 1.62;
+        accX = 1.39 * (1 - exitProgress);
+        accZ = -mockThrottle * 0.45;
+        tyres[0].slipAngle = -mockSteer * 6;
+        tyres[1].slipAngle = -mockSteer * 5;
+      } else {
+        mockThrottle = 1;
+        mockBrake = 0;
+        mockSteer = 0;
+        mockSpeedMs += 0.35;
+        mockGear = 4;
+        mockRPM = 4800 + (mockSpeedMs - 40) * 80;
+        trackPosLat = -0.8;
+        accZ = -0.3;
+      }
+      const mockData = {
+        speedMs: mockSpeedMs,
+        speedKmh: mockSpeedMs * 3.6,
+        gear: mockGear,
+        engineRPM: mockRPM,
+        steer: mockSteer,
+        throttle: mockThrottle,
+        brake: mockBrake,
+        clutch: 0,
+        yaw: 0,
+        yawRate: mockSteer * (mockSpeedMs / 30),
+        accG: { x: accX, y: 0, z: -accZ },
+        tyres,
+        nextTurnDist,
+        nextTurnAngle,
+        roadGrip: 1,
+        trackPosLat
+      };
+      window.onTelemetryUpdate(mockData);
+    }, 16.7);
+  }
+  if (window.location.search.includes("mock=true")) {
+    initDOM();
+    startMockSimulation();
+  }
+})();

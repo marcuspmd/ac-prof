@@ -4,8 +4,8 @@
   "description": "Smart overlay and racing coach for Assetto Corsa.",
   "main": "lua-app/race-coach-overlay.lua",
   "scripts": {
-    "build": "tsc",
-    "watch": "tsc --watch",
+    "build": "tsc --noEmit && esbuild overlay/app.ts --bundle --outfile=overlay/app.js",
+    "watch": "esbuild overlay/app.ts --bundle --outfile=overlay/app.js --watch",
     "zip": "mkdir -p apps/lua/race-coach-overlay && cp -r lua-app/* apps/lua/race-coach-overlay/ && mkdir -p apps/lua/race-coach-overlay/overlay && cp overlay/index.html overlay/style.css overlay/app.js apps/lua/race-coach-overlay/overlay/ && python3 -m zipfile -c race-coach-overlay.zip apps/ && rm -rf apps/"
   },
   "keywords": [
@@ -18,6 +18,7 @@
   "author": "Marcus Paulo Mazzon Dias",
   "license": "MIT",
   "devDependencies": {
+    "esbuild": "^0.21.0",
     "typescript": "^5.0.0"
   }
 }

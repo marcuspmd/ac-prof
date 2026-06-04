@@ -18,6 +18,20 @@
       <div id="delta-display" class="delta-neutral">--.---</div>
     </header>
 
+    <!-- Barra de Posicionamento e Alvo de Curva -->
+    <div id="track-pos-bar" class="panel-glass">
+      <span class="track-pos-title">POSICIONAMENTO DE PISTA</span>
+      <div class="track-line">
+        <div id="track-pos-target" class="track-marker target-marker"></div>
+        <div id="track-pos-car" class="track-marker car-marker"></div>
+      </div>
+      <div class="track-labels">
+        <span id="track-label-left">ESQ</span>
+        <span class="track-label-center">CENTRO</span>
+        <span id="track-label-right">DIR</span>
+      </div>
+    </div>
+
     <!-- Área Principal de Telemetria -->
     <main class="telemetry-grid">
       <!-- Painel de Velocidade e Marcha -->
@@ -82,6 +96,11 @@
             <div class="tyre-indicator RL" id="tyre-rl"><span class="tyre-label">RL</span></div>
             <div class="tyre-indicator RR" id="tyre-rr"><span class="tyre-label">RR</span></div>
           </div>
+
+          <!-- Gráfico Rolante de Inputs -->
+          <div class="trace-wrapper">
+            <canvas id="trace-canvas" width="180" height="42"></canvas>
+          </div>
         </section>
       </div>
     </main>
@@ -95,6 +114,34 @@
       </div>
     </footer>
   </div>
+
+  <!-- Painel Pós-Curva (Scorecard Overlay) -->
+  <div id="scorecard-overlay" class="scorecard-hidden">
+    <div class="scorecard-header">
+      <span class="scorecard-title">CURVA COMPLETADA</span>
+      <span id="scorecard-grade">--</span>
+    </div>
+    <div class="scorecard-body">
+      <div class="scorecard-row">
+        <span class="row-label">Velocidade Ápice:</span>
+        <span id="scorecard-apex-speed" class="row-val">-- km/h</span>
+      </div>
+      <div class="scorecard-row">
+        <span class="row-label">Trail Braking:</span>
+        <span id="scorecard-trail-score" class="row-val">--%</span>
+      </div>
+      <div class="scorecard-row">
+        <span class="row-label">Ápice da Curva:</span>
+        <span id="scorecard-apex-timing" class="row-val">--</span>
+      </div>
+      <div class="scorecard-row">
+        <span class="row-label">Uso de Grip:</span>
+        <span id="scorecard-grip-util" class="row-val">--%</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="colors-panel" class="state-neutral"></div>
 
   <script src="app.js"></script>
 </body>

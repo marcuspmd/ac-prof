@@ -170,7 +170,7 @@ body {
 /* Painel de Inputs & Slip */
 .inputs-panel {
   align-items: stretch;
-  height: 94px;
+  height: 146px; /* Aumentado de 94px para comportar o trace canvas */
   padding: 6px 8px;
 }
 
@@ -228,6 +228,7 @@ body {
 }
 
 .tyre-indicator {
+  position: relative; /* Adicionado para suportar labels absolutos como Scrub */
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: 4px;
@@ -533,4 +534,245 @@ body.mode-gg #gg-canvas {
   max-width: 150px !important;
   max-height: 150px !important;
   object-fit: contain !important;
+}
+
+/* Ocultar o painel de cores por padrão nos outros modos */
+#colors-panel {
+  display: none;
+}
+
+/* MODO COLORS (Apenas semáforo visual de frenagem/curva) */
+body.mode-colors #overlay-container {
+  display: none !important;
+}
+
+body.mode-colors #colors-panel {
+  display: block !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  border-radius: 12px !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease !important;
+}
+
+body.mode-colors #colors-panel.state-neutral {
+  background-color: rgba(17, 24, 39, 0.6) !important;
+  box-shadow: none !important;
+}
+
+body.mode-colors #colors-panel.state-safe {
+  background-color: #10b981 !important;
+  box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.2), 0 0 25px rgba(16, 185, 129, 0.85) !important;
+}
+
+body.mode-colors #colors-panel.state-warning {
+  background-color: #f59e0b !important;
+  box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.2), 0 0 25px rgba(245, 158, 11, 0.85) !important;
+}
+
+body.mode-colors #colors-panel.state-braking {
+  background-color: #06b6d4 !important;
+  box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.2), 0 0 25px rgba(6, 182, 212, 0.85) !important;
+}
+
+body.mode-colors #colors-panel.state-danger {
+  background-color: #ef4444 !important;
+  box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.2), 0 0 35px rgba(239, 68, 68, 0.95) !important;
+  animation: color-flash-state 0.4s infinite alternate !important;
+}
+
+@keyframes color-flash-state {
+  0% { opacity: 0.7; box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.2), 0 0 15px rgba(239, 68, 68, 0.5) !important; }
+  100% { opacity: 1.0; box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.2), 0 0 45px rgba(239, 68, 68, 1.0) !important; }
+}
+
+/* ==========================================================================
+   ESTILOS DOS NOVOS RECURSOS DE TELEMETRIA AVANÇADA
+   ========================================================================== */
+
+/* 1. Trace de Inputs */
+.trace-wrapper {
+  margin-top: 6px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  padding: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+}
+#trace-canvas {
+  display: block;
+  width: 100%;
+  height: 42px;
+}
+
+/* 2. Barra de Posicionamento e Alvo de Curva */
+#track-pos-bar {
+  width: 100%;
+  height: 52px;
+  padding: 6px 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  flex-shrink: 0;
+}
+.track-pos-title {
+  font-size: 8px;
+  font-weight: 600;
+  color: #9ca3af;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.track-line {
+  position: relative;
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  margin: 6px 0;
+}
+.track-marker {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  transition: left 0.05s ease-out;
+}
+.target-marker {
+  width: 12px;
+  height: 12px;
+  background: #10b981;
+  box-shadow: 0 0 10px #10b981;
+  z-index: 10;
+}
+.car-marker {
+  width: 10px;
+  height: 10px;
+  background: #3b82f6;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 8px #3b82f6;
+  z-index: 11;
+}
+.track-labels {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  font-size: 8px;
+  color: #6b7280;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+/* 3. Painel Pós-Curva (Scorecard Overlay) */
+#scorecard-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(1);
+  width: 250px;
+  background: rgba(17, 24, 39, 0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 10px 45px rgba(0, 0, 0, 0.7);
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  opacity: 1;
+}
+.scorecard-hidden {
+  opacity: 0 !important;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(0.7) !important;
+}
+.scorecard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 8px;
+}
+.scorecard-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #9ca3af;
+  text-transform: uppercase;
+}
+#scorecard-grade {
+  font-size: 26px;
+  font-weight: 700;
+}
+.scorecard-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.scorecard-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+}
+.row-label {
+  color: #9ca3af;
+}
+.row-val {
+  font-weight: 600;
+  color: #ffffff;
+}
+
+/* Cores de Notas (Grades) */
+.grade-gold { color: #f59e0b !important; text-shadow: 0 0 10px rgba(245, 158, 11, 0.5) !important; }
+.grade-green { color: #10b981 !important; text-shadow: 0 0 10px rgba(16, 185, 129, 0.5) !important; }
+.grade-blue { color: #3b82f6 !important; text-shadow: 0 0 10px rgba(59, 130, 246, 0.5) !important; }
+.grade-red { color: #ef4444 !important; text-shadow: 0 0 10px rgba(239, 68, 68, 0.5) !important; }
+
+/* 4. Alerta de Steering Scrub nos Pneus */
+.tyre-scrub {
+  background: rgba(168, 85, 247, 0.25) !important; /* Roxo/Púrpura */
+  border-color: rgba(168, 85, 247, 0.8) !important;
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.6);
+  animation: tyre-scrub-flash 0.3s infinite alternate;
+}
+.tyre-scrub .tyre-label {
+  color: #c084fc !important;
+  font-weight: 700;
+}
+.tyre-scrub::after {
+  content: 'SCRUB';
+  position: absolute;
+  font-size: 6px;
+  background: #a855f7;
+  color: #ffffff;
+  padding: 0px 2px;
+  border-radius: 2px;
+  bottom: -6px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  box-shadow: 0 0 4px #a855f7;
+  z-index: 12;
+}
+@keyframes tyre-scrub-flash {
+  0% { border-color: rgba(168, 85, 247, 0.4); }
+  100% { border-color: rgba(168, 85, 247, 1.0); }
+}
+
+/* 5. Suporte a Ocultação sob Sub-modos */
+body.mode-hud #track-pos-bar,
+body.mode-hud #scorecard-overlay,
+body.mode-next-turn #track-pos-bar,
+body.mode-next-turn #scorecard-overlay,
+body.mode-gg #track-pos-bar,
+body.mode-gg #scorecard-overlay,
+body.mode-colors #track-pos-bar,
+body.mode-colors #scorecard-overlay {
+  display: none !important;
 }
