@@ -56,32 +56,57 @@ end
 
 -- Control Panel Window (Native ImGui Interface)
 function windowSettings(dt)
-  ui.toolWindow('RaceCoachSettings', vec2(100, 100), vec2(320, 220), false, true, function()
+  ui.toolWindow('RaceCoachSettings', vec2(100, 100), vec2(350, 420), false, true, function()
     ui.pushFont(ui.Font.Title)
     ui.text("Race Coach - Configurações")
     ui.popFont()
     
     ui.separator()
-    ui.offsetCursorY(8)
+    ui.offsetCursorY(6)
     
     if ui.checkbox("Ativar Vozes (Feedback de Áudio)", config.voiceEnabled) then
       config.voiceEnabled = not config.voiceEnabled
     end
-    ui.textColored("Ativa o feedback falado em tempo real sobre frenagem, curvas e erros.", rgbm(0.6, 0.6, 0.6, 1.0))
+    ui.textColored("Ativa o feedback falado em tempo real do engenheiro de pista.", rgbm(0.6, 0.6, 0.6, 1.0))
     
-    ui.offsetCursorY(8)
+    ui.offsetCursorY(6)
     
-    if ui.checkbox("Desenhar Entrada, Ápice e Saída na Pista", config.drawEntryApexExit) then
+    if ui.checkbox("Mostrar Linha Ideal na Pista", config.showRacingLine) then
+      config.showRacingLine = not config.showRacingLine
+    end
+    ui.textColored("Desenha a linha de trajetória ideal colorida no asfalto.", rgbm(0.6, 0.6, 0.6, 1.0))
+    
+    ui.offsetCursorY(6)
+    
+    if ui.checkbox("Desenhar Entrada, Ápice e Saída", config.drawEntryApexExit) then
       config.drawEntryApexExit = not config.drawEntryApexExit
     end
-    ui.textColored("Mostra linhas e marcações no asfalto nos pontos cruciais da curva.", rgbm(0.6, 0.6, 0.6, 1.0))
+    ui.textColored("Mostra marcações nos pontos cruciais da curva (Entrada, Ápice, Saída).", rgbm(0.6, 0.6, 0.6, 1.0))
     
-    ui.offsetCursorY(8)
+    ui.offsetCursorY(6)
     
-    if ui.checkbox("Mostrar Holograma de Velocidade (Ideal vs Atual)", config.showSpeedHolograms) then
+    if ui.checkbox("Mostrar Holograma de Velocidades", config.showSpeedHolograms) then
       config.showSpeedHolograms = not config.showSpeedHolograms
     end
-    ui.textColored("Projeta a velocidade atual e a ideal no ponto de frenagem da curva.", rgbm(0.6, 0.6, 0.6, 1.0))
+    ui.textColored("Projeta as velocidades ideal e atual antes da curva.", rgbm(0.6, 0.6, 0.6, 1.0))
+    
+    ui.separator()
+    ui.offsetCursorY(6)
+    ui.header("Ajuste Fino de Pilotagem")
+    
+    local speedVal, speedChanged = ui.slider("Ajuste de Velocidade Curva", config.cornerSpeedBias * 100, 80, 120, "%.0f%%")
+    if speedChanged then
+      config.cornerSpeedBias = speedVal / 100
+    end
+    ui.textColored("Altera a velocidade ideal alvo nas curvas (maior = mais rápido/agressivo).", rgbm(0.6, 0.6, 0.6, 1.0))
+    
+    ui.offsetCursorY(6)
+    
+    local brakeVal, brakeChanged = ui.slider("Margem da Zona de Frenagem", config.brakingMargin * 100, 70, 130, "%.0f%%")
+    if brakeChanged then
+      config.brakingMargin = brakeVal / 100
+    end
+    ui.textColored("Ajusta a distância de frenagem (menor = freia mais tarde/perigoso).", rgbm(0.6, 0.6, 0.6, 1.0))
   end)
 end
 
@@ -91,23 +116,41 @@ ui.addSettings({
   id = "RaceCoachSettingsPanel",
   icon = ui.Icons.Settings,
   size = {
-    default = vec2(320, 220),
-    min = vec2(250, 150)
+    default = vec2(350, 420),
+    min = vec2(280, 300)
   }
 }, function()
   ui.header("Geral")
   if ui.checkbox("Ativar Vozes do Engenheiro", config.voiceEnabled) then
     config.voiceEnabled = not config.voiceEnabled
   end
-  ui.offsetCursorY(5)
+  ui.offsetCursorY(4)
+  if ui.checkbox("Mostrar Linha Ideal", config.showRacingLine) then
+    config.showRacingLine = not config.showRacingLine
+  end
+  ui.offsetCursorY(4)
   if ui.checkbox("Marcar Entrada, Ápice e Saída", config.drawEntryApexExit) then
     config.drawEntryApexExit = not config.drawEntryApexExit
   end
-  ui.offsetCursorY(5)
-  if ui.checkbox("Holograma de Velocidade", config.showSpeedHolograms) then
+  ui.offsetCursorY(4)
+  if ui.checkbox("Holograma de Velocidades", config.showSpeedHolograms) then
     config.showSpeedHolograms = not config.showSpeedHolograms
   end
+
+  ui.separator()
+  ui.header("Ajuste Fino de Pilotagem")
+  
+  local speedVal, speedChanged = ui.slider("Ajuste de Velocidade Curva", config.cornerSpeedBias * 100, 80, 120, "%.0f%%")
+  if speedChanged then
+    config.cornerSpeedBias = speedVal / 100
+  end
+  ui.offsetCursorY(4)
+  local brakeVal, brakeChanged = ui.slider("Margem de Frenagem", config.brakingMargin * 100, 70, 130, "%.0f%%")
+  if brakeChanged then
+    config.brakingMargin = brakeVal / 100
+  end
 end)
+
 
 
 -- Main physics loop updates and 3D track painter drawings

@@ -1,4 +1,5 @@
 -- Physics calculations and G-Force auto-calibration for Race Coach Overlay
+local config = require('config')
 local M = {}
 
 -- Peak G-forces observed during the session (starts with sensible defaults)
@@ -59,7 +60,7 @@ function M.calculateTurnPhysics(car, upcomingTurn, roadGrip)
 
     local gripFactor = math.sqrt(math.max(0.1, roadGrip))
     local carPerformanceFactor = math.min(1.25, math.sqrt(M.maxObservedLatG / 1.4))
-    local vTargetKmh = baseTargetKmh * gripFactor * carPerformanceFactor
+    local vTargetKmh = baseTargetKmh * gripFactor * carPerformanceFactor * config.cornerSpeedBias
     vTarget = vTargetKmh / 3.6
 
     local targetDecel = M.maxObservedDecelG * 9.81 * 0.80 * math.max(0.5, roadGrip)
@@ -69,7 +70,7 @@ function M.calculateTurnPhysics(car, upcomingTurn, roadGrip)
     if car.speedMs > vTarget then
       physicalBrakingDistance = (car.speedMs * car.speedMs - vTarget * vTarget) / (2 * targetDecel)
     end
-    totalBrakingDistanceNeeded = physicalBrakingDistance + reactionDistance
+    totalBrakingDistanceNeeded = (physicalBrakingDistance + reactionDistance) * config.brakingMargin
   end
 
   return nextTurnDist, nextTurnAngle, vTarget, totalBrakingDistanceNeeded
