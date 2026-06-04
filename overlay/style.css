@@ -9,8 +9,10 @@ body {
   font-family: 'Outfit', sans-serif;
   color: #f3f4f6;
   background-color: transparent; /* Permite fundo transparente no jogo */
-  width: 400px;
-  height: 300px;
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  padding: 0;
   overflow: hidden;
   user-select: none;
 }
@@ -65,10 +67,17 @@ body {
 /* Grid de Telemetria */
 .telemetry-grid {
   display: grid;
-  grid-template-columns: 1.1fr 1fr 1.3fr;
+  grid-template-columns: 1fr 1.05fr 1.25fr;
   gap: 8px;
   margin: 8px 0;
   flex-grow: 1;
+}
+
+.right-panel-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
 }
 
 .panel-glass {
@@ -161,13 +170,15 @@ body {
 /* Painel de Inputs & Slip */
 .inputs-panel {
   align-items: stretch;
+  height: 94px;
+  padding: 6px 8px;
 }
 
 .pedals-wrapper {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-top: 4px;
+  gap: 4px;
+  margin-top: 2px;
 }
 
 .pedal-channel {
@@ -185,9 +196,9 @@ body {
 
 .pedal-bar {
   flex-grow: 1;
-  height: 6px;
+  height: 5px;
   background: rgba(255, 255, 255, 0.1);
-  border-radius: 3px;
+  border-radius: 2.5px;
   overflow: hidden;
 }
 
@@ -212,15 +223,15 @@ body {
 .tyres-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  margin-top: 10px;
+  gap: 3px;
+  margin-top: 4px;
 }
 
 .tyre-indicator {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: 4px;
-  height: 18px;
+  height: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -300,4 +311,226 @@ body {
   0% { transform: scale(1); opacity: 0.8; }
   50% { transform: scale(1.05); opacity: 1; }
   100% { transform: scale(1); opacity: 0.8; }
+}
+
+/* Indicador de Próxima Curva */
+#next-turn-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px;
+  border-radius: 12px;
+  transition: all 0.3s ease;
+  height: 96px;
+  width: 100%;
+}
+
+.next-turn-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 2px 0;
+}
+
+#next-turn-arrow {
+  font-size: 32px;
+  display: inline-block;
+  animation: pulse-turn 1.5s infinite ease-in-out;
+  line-height: 1;
+}
+
+#next-turn-distance {
+  font-size: 24px;
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 1;
+}
+
+#next-turn-target-speed {
+  font-size: 11px;
+  font-weight: 600;
+  color: #a3a3a3;
+  margin-top: 1px;
+  margin-bottom: 1px;
+  text-shadow: 0 0 4px rgba(255, 255, 255, 0.1);
+}
+
+#next-turn-action {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+
+#next-turn-status-indicator {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  transition: background-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.status-neutral {
+  background-color: rgba(255, 255, 255, 0.15);
+  box-shadow: none;
+}
+
+.status-safe {
+  background-color: #10b981;
+  box-shadow: 0 0 6px #10b981;
+}
+
+.status-warning {
+  background-color: #f59e0b;
+  box-shadow: 0 0 6px #f59e0b;
+}
+
+.status-danger {
+  background-color: #ef4444;
+  box-shadow: 0 0 8px #ef4444;
+}
+
+.status-braking {
+  background-color: #06b6d4;
+  box-shadow: 0 0 8px #06b6d4;
+}
+
+/* Modificadores de estado do painel da curva */
+.next-turn-safe {
+  background: rgba(16, 185, 129, 0.08) !important;
+  border-color: rgba(16, 185, 129, 0.3) !important;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.1);
+}
+.next-turn-safe #next-turn-action {
+  color: #10b981;
+}
+
+.next-turn-warning {
+  background: rgba(245, 158, 11, 0.08) !important;
+  border-color: rgba(245, 158, 11, 0.3) !important;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.1);
+}
+.next-turn-warning #next-turn-action {
+  color: #f59e0b;
+}
+
+.next-turn-danger {
+  background: rgba(239, 68, 68, 0.12) !important;
+  border-color: rgba(239, 68, 68, 0.4) !important;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.2);
+  animation: border-flash 1s infinite alternate;
+}
+.next-turn-danger #next-turn-action {
+  color: #ef4444;
+}
+
+.next-turn-braking {
+  background: rgba(6, 182, 212, 0.1) !important;
+  border-color: rgba(6, 182, 212, 0.4) !important;
+  box-shadow: 0 0 8px rgba(6, 182, 212, 0.2);
+}
+.next-turn-braking #next-turn-action {
+  color: #06b6d4;
+}
+
+@keyframes border-flash {
+  0% { border-color: rgba(239, 68, 68, 0.3); box-shadow: 0 0 4px rgba(239, 68, 68, 0.1); }
+  100% { border-color: rgba(239, 68, 68, 0.8); box-shadow: 0 0 10px rgba(239, 68, 68, 0.4); }
+}
+
+@keyframes pulse-turn {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+
+/* --- MODOS DE EXIBIÇÃO PARA MÚLTIPLAS JANELAS --- */
+
+/* MODO HUD (Apenas Velocidade, Marcha, Pedais, Pneus e Mensagem do Engenheiro) */
+body.mode-hud .gg-panel,
+body.mode-hud #next-turn-display,
+body.mode-hud .app-title {
+  display: none !important;
+}
+
+body.mode-hud .telemetry-grid {
+  grid-template-columns: 1fr 1.25fr !important;
+}
+
+body.mode-hud .inputs-panel {
+  height: 100% !important;
+}
+
+/* MODO NEXT TURN (Apenas a placa da curva e velocidade ideal) */
+body.mode-next-turn .app-header,
+body.mode-next-turn .gauge-panel,
+body.mode-next-turn .gg-panel,
+body.mode-next-turn .inputs-panel,
+body.mode-next-turn #coach-panel {
+  display: none !important;
+}
+
+body.mode-next-turn #overlay-container,
+body.mode-next-turn .telemetry-grid,
+body.mode-next-turn .right-panel-wrapper {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
+body.mode-next-turn #next-turn-display {
+  height: 100vh !important;
+  width: 100vw !important;
+  border-radius: 12px !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: rgba(17, 24, 39, 0.75) !important;
+  backdrop-filter: blur(12px) !important;
+  padding: 8px !important;
+}
+
+/* MODO GG (Apenas o círculo G-G / Radar) */
+body.mode-gg .app-header,
+body.mode-gg .gauge-panel,
+body.mode-gg .right-panel-wrapper,
+body.mode-gg #coach-panel {
+  display: none !important;
+}
+
+body.mode-gg #overlay-container,
+body.mode-gg .telemetry-grid {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
+body.mode-gg .gg-panel {
+  height: 100vh !important;
+  width: 100vw !important;
+  border-radius: 12px !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: rgba(17, 24, 39, 0.75) !important;
+  backdrop-filter: blur(12px) !important;
+  padding: 8px !important;
+  justify-content: center !important;
+}
+
+body.mode-gg #gg-canvas {
+  width: 90% !important;
+  height: 90% !important;
+  max-width: 150px !important;
+  max-height: 150px !important;
+  object-fit: contain !important;
 }

@@ -24,4 +24,8 @@ interface TelemetryData {
   yawRate: number;     // Taxa de rotação em torno do eixo vertical (rad/s)
   accG: GForces;       // Forças G no centro de gravidade
   tyres: TyreTelemetry[]; // Telemetria de pneus (FL, FR, RL, RR)
+  nextTurnDist: number;   // Distância para a próxima curva em metros (-1 se inválido/indisponível)
+  nextTurnAngle: number;  // Ângulo da curva em graus (positivo = esquerda, negativo = direita)
+  roadGrip: number;       // Nível de aderência da pista (0.0 a 1.0)
+  trackPosLat: number;    // Posição lateral do carro na pista (-1.0 = esquerda, 1.0 = direita, 0.0 = centro)
 }

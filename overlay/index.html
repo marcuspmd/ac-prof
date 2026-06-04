@@ -42,34 +42,48 @@
         </div>
       </section>
 
-      <!-- Pedais e Slip dos Pneus -->
-      <section class="inputs-panel panel-glass">
-        <h2 class="panel-title">INPUTS & SLIP</h2>
-        <div class="pedals-wrapper">
-          <!-- Throttle -->
-          <div class="pedal-channel">
-            <span class="pedal-label">THR</span>
-            <div class="pedal-bar">
-              <div id="throttle-bar" class="pedal-fill throttle-fill"></div>
-            </div>
+      <!-- Painel da Direita (Next Turn e Inputs/Slip) -->
+      <div class="right-panel-wrapper">
+        <section id="next-turn-display" class="panel-glass">
+          <span class="panel-title">PRÓXIMA CURVA</span>
+          <div class="next-turn-content">
+            <span id="next-turn-arrow">↩️</span>
+            <span id="next-turn-distance">--m</span>
           </div>
-          <!-- Brake -->
-          <div class="pedal-channel">
-            <span class="pedal-label">BRK</span>
-            <div class="pedal-bar">
-              <div id="brake-bar" class="pedal-fill brake-fill"></div>
-            </div>
-          </div>
-        </div>
+          <div id="next-turn-target-speed">Ideal: -- km/h</div>
+          <div id="next-turn-action">MANTENHA VELOCIDADE</div>
+          <div id="next-turn-status-indicator" class="status-neutral"></div>
+        </section>
 
-        <!-- Escorregamento dos Pneus (Tyre Slip) -->
-        <div class="tyres-grid">
-          <div class="tyre-indicator FL" id="tyre-fl"><span class="tyre-label">FL</span></div>
-          <div class="tyre-indicator FR" id="tyre-fr"><span class="tyre-label">FR</span></div>
-          <div class="tyre-indicator RL" id="tyre-rl"><span class="tyre-label">RL</span></div>
-          <div class="tyre-indicator RR" id="tyre-rr"><span class="tyre-label">RR</span></div>
-        </div>
-      </section>
+        <!-- Pedais e Slip dos Pneus -->
+        <section class="inputs-panel panel-glass">
+          <h2 class="panel-title">INPUTS & SLIP</h2>
+          <div class="pedals-wrapper">
+            <!-- Throttle -->
+            <div class="pedal-channel">
+              <span class="pedal-label">THR</span>
+              <div class="pedal-bar">
+                <div id="throttle-bar" class="pedal-fill throttle-fill"></div>
+              </div>
+            </div>
+            <!-- Brake -->
+            <div class="pedal-channel">
+              <span class="pedal-label">BRK</span>
+              <div class="pedal-bar">
+                <div id="brake-bar" class="pedal-fill brake-fill"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Escorregamento dos Pneus (Tyre Slip) -->
+          <div class="tyres-grid">
+            <div class="tyre-indicator FL" id="tyre-fl"><span class="tyre-label">FL</span></div>
+            <div class="tyre-indicator FR" id="tyre-fr"><span class="tyre-label">FR</span></div>
+            <div class="tyre-indicator RL" id="tyre-rl"><span class="tyre-label">RL</span></div>
+            <div class="tyre-indicator RR" id="tyre-rr"><span class="tyre-label">RR</span></div>
+          </div>
+        </section>
+      </div>
     </main>
 
     <!-- Área de Coaching & Alertas -->
