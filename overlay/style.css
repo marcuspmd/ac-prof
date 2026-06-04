@@ -19,10 +19,10 @@ body {
 
 /* Glassmorphism Container principal */
 .glassmorphism {
-  background: rgba(17, 24, 39, 0.75);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(17, 24, 39, var(--overlay-opacity, 0.75));
+  backdrop-filter: blur(calc(12px * (var(--overlay-opacity, 0.75) / 0.75)));
+  -webkit-backdrop-filter: blur(calc(12px * (var(--overlay-opacity, 0.75) / 0.75)));
+  border: 1px solid rgba(255, 255, 255, calc(0.08 * (var(--overlay-opacity, 0.75) / 0.75)));
   border-radius: 16px;
   width: 100%;
   height: 100%;
@@ -30,7 +30,7 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, calc(0.37 * (var(--overlay-opacity, 0.75) / 0.75)));
 }
 
 /* Header */
@@ -81,8 +81,8 @@ body {
 }
 
 .panel-glass {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, calc(0.03 * (var(--overlay-opacity, 0.75) / 0.75)));
+  border: 1px solid rgba(255, 255, 255, calc(0.05 * (var(--overlay-opacity, 0.75) / 0.75)));
   border-radius: 12px;
   padding: 8px;
   display: flex;
@@ -350,12 +350,32 @@ body {
 }
 
 #next-turn-target-speed {
-  font-size: 11px;
-  font-weight: 600;
-  color: #a3a3a3;
-  margin-top: 1px;
-  margin-bottom: 1px;
-  text-shadow: 0 0 4px rgba(255, 255, 255, 0.1);
+  font-size: 24px;
+  font-weight: 700;
+  color: #ffffff;
+  margin-top: 4px;
+  margin-bottom: 4px;
+  letter-spacing: 0.5px;
+  text-shadow: 0 0 6px rgba(255, 255, 255, 0.15);
+}
+
+#next-turn-target-speed span {
+  font-size: 24px;
+}
+
+#next-turn-target-speed .speed-safe {
+  color: #10b981;
+  text-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+}
+
+#next-turn-target-speed .speed-warning {
+  color: #f59e0b;
+  text-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+}
+
+#next-turn-target-speed .speed-danger {
+  color: #ef4444;
+  text-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
 }
 
 #next-turn-action {
@@ -490,9 +510,9 @@ body.mode-next-turn #next-turn-display {
   height: 100vh !important;
   width: 100vw !important;
   border-radius: 12px !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  background: rgba(17, 24, 39, 0.75) !important;
-  backdrop-filter: blur(12px) !important;
+  border: 1px solid rgba(255, 255, 255, calc(0.08 * (var(--overlay-opacity, 0.75) / 0.75))) !important;
+  background: rgba(17, 24, 39, var(--overlay-opacity, 0.75)) !important;
+  backdrop-filter: blur(calc(12px * (var(--overlay-opacity, 0.75) / 0.75))) !important;
   padding: 8px !important;
 }
 
@@ -521,9 +541,9 @@ body.mode-gg .gg-panel {
   height: 100vh !important;
   width: 100vw !important;
   border-radius: 12px !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  background: rgba(17, 24, 39, 0.75) !important;
-  backdrop-filter: blur(12px) !important;
+  border: 1px solid rgba(255, 255, 255, calc(0.08 * (var(--overlay-opacity, 0.75) / 0.75))) !important;
+  background: rgba(17, 24, 39, var(--overlay-opacity, 0.75)) !important;
+  backdrop-filter: blur(calc(12px * (var(--overlay-opacity, 0.75) / 0.75))) !important;
   padding: 8px !important;
   justify-content: center !important;
 }
@@ -556,7 +576,7 @@ body.mode-colors #colors-panel {
 }
 
 body.mode-colors #colors-panel.state-neutral {
-  background-color: rgba(17, 24, 39, 0.6) !important;
+  background-color: rgba(17, 24, 39, var(--overlay-opacity, 0.6)) !important;
   box-shadow: none !important;
 }
 
@@ -674,7 +694,7 @@ body.mode-colors #colors-panel.state-danger {
   left: 50%;
   transform: translate(-50%, -50%) scale(1);
   width: 250px;
-  background: rgba(17, 24, 39, 0.92);
+  background: rgba(17, 24, 39, var(--overlay-opacity, 0.92));
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(255, 255, 255, 0.15);
@@ -775,4 +795,57 @@ body.mode-gg #scorecard-overlay,
 body.mode-colors #track-pos-bar,
 body.mode-colors #scorecard-overlay {
   display: none !important;
+}
+
+/* --- MODO SPEED (Janela de Velocidade Simplificada) --- */
+#speed-widget {
+  display: none;
+}
+
+body.mode-speed #overlay-container {
+  display: none !important;
+}
+
+body.mode-speed #speed-widget {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  width: 100vw;
+  height: 100vh;
+  background: transparent;
+}
+
+.speed-widget-main {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  font-weight: 700;
+  line-height: 0.9;
+}
+
+#speed-widget-actual {
+  font-size: 35vh;
+  transition: color 0.15s ease;
+}
+
+.speed-widget-separator {
+  font-size: 20vh;
+  color: #4b5563;
+  margin: 0 4vh;
+}
+
+#speed-widget-target {
+  font-size: 25vh;
+  color: #3b82f6;
+  text-shadow: 0 0 15px rgba(59, 130, 246, 0.3);
+}
+
+.speed-widget-label {
+  font-size: 6vh;
+  font-weight: 600;
+  color: #4b5563;
+  text-transform: uppercase;
+  margin-top: 2vh;
+  letter-spacing: 2px;
 }

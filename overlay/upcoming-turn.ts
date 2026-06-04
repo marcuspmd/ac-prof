@@ -178,7 +178,7 @@ export function updateUpcomingTurn(data: TelemetryData): void {
     nextTurnArrow.innerText = "↩️";
     nextTurnDisplay.className = "panel-glass";
     nextTurnStatusIndicator.className = "status-neutral";
-    nextTurnTargetSpeed.innerText = "Ideal: -- km/h";
+    nextTurnTargetSpeed.innerHTML = `<span style="color: #ffffff;">${Math.round(data.speedKmh)}</span> <span style="color: #6b7280;">/</span> <span style="color: #6b7280;">--</span> <span style="font-size: 10px; color: #6b7280; margin-left: 2px;">km/h</span>`;
     nextTurnAction.innerText = "MANTENHA VELOCIDADE";
     if (colorsPanel) colorsPanel.className = "state-neutral";
     state.hasAnnouncedCurrentTurn = false;
@@ -208,7 +208,7 @@ export function updateUpcomingTurn(data: TelemetryData): void {
   const absAngle = Math.abs(angle);
 
   // Corner entry target speed calculation
-  let baseTargetKmh = 800 / Math.sqrt(Math.max(1.0, absAngle));
+  let baseTargetKmh = 3500 / (absAngle + 15) + 45;
   baseTargetKmh = Math.max(50, Math.min(290, baseTargetKmh));
 
   const gripFactor = Math.sqrt(Math.max(0.1, data.roadGrip));
@@ -225,7 +225,15 @@ export function updateUpcomingTurn(data: TelemetryData): void {
   }
 
   const vTarget = vTargetKmh / 3.6;
-  nextTurnTargetSpeed.innerText = `Ideal: ${Math.round(vTargetKmh)} km/h`;
+  
+  const actualKmh = data.speedKmh;
+  let speedClass = "speed-safe";
+  if (actualKmh > vTargetKmh + 15) {
+    speedClass = "speed-danger";
+  } else if (actualKmh > vTargetKmh + 5) {
+    speedClass = "speed-warning";
+  }
+  nextTurnTargetSpeed.innerHTML = `<span class="${speedClass}">${Math.round(actualKmh)}</span> <span style="color: #6b7280; font-weight: normal;">/</span> <span style="color: #3b82f6;">${Math.round(vTargetKmh)}</span> <span style="font-size: 10px; color: #6b7280; margin-left: 2px;">km/h</span>`;
 
   // Braking distance calculations
   const targetDecelMs2 = state.maxObservedDecelG * 9.81 * 0.80 * Math.max(0.5, data.roadGrip);
@@ -326,106 +334,27 @@ export function updateUpcomingTurn(data: TelemetryData): void {
   }
 }
 
-// Process corner score card overlay at exit of the corner
-export function processCornerStats(): void {
-  if (state.cornerSamples.length < 5) return;
+// Process corner score card overlay at exit of the corner (called by Lua backend or mock)
+export function displayCornerScorecard(scorecard: any): void {
   if (!scorecardOverlay || !scorecardGrade || !scorecardApexSpeed || !scorecardTrailScore || !scorecardApexTiming || !scorecardGripUtil) {
     initUpcomingTurn();
     if (!scorecardOverlay || !scorecardGrade || !scorecardApexSpeed || !scorecardTrailScore || !scorecardApexTiming || !scorecardGripUtil) return;
   }
 
-  const speedKmhList = state.cornerSamples.map(s => s.speedMs * 3.6);
-  const minSpeedKmh = Math.min(...speedKmhList);
-  
-  let baseTargetKmh = 800 / Math.sqrt(Math.max(1.0, Math.abs(state.currentCornerAngle)));
-  baseTargetKmh = Math.max(50, Math.min(290, baseTargetKmh));
-  const gripFactor = Math.sqrt(Math.max(0.1, state.cornerSamples[0].roadGrip));
-  const carPerformanceFactor = Math.min(1.25, Math.sqrt(state.maxObservedLatG / 1.4));
-  const targetKmh = baseTargetKmh * gripFactor * carPerformanceFactor;
-
-  const speedDiff = minSpeedKmh - targetKmh;
-  let speedScore = 100;
-  if (speedDiff < 0) {
-    speedScore = Math.max(0, 100 - Math.abs(speedDiff) * 4.5);
-  } else {
-    speedScore = Math.max(0, 100 - Math.abs(speedDiff) * 2.5);
-  }
-
-  let trailBrakingSamples = 0;
-  let perfectTrailSamples = 0;
-  let highBrakeSteerSamples = 0;
-  let earlyRelease = true;
-
-  state.cornerSamples.forEach(s => {
-    if (Math.abs(s.steer) > 0.15) {
-      if (s.brake > 0.05) {
-        earlyRelease = false;
-        trailBrakingSamples++;
-        if (s.brake <= 0.3) {
-          perfectTrailSamples++;
-        } else {
-          highBrakeSteerSamples++;
-        }
-      }
-    }
-  });
-
-  let trailScore = 0;
-  if (earlyRelease) {
-    trailScore = 35;
-  } else if (trailBrakingSamples > 0) {
-    const perfectRatio = perfectTrailSamples / trailBrakingSamples;
-    const highBrakeRatio = highBrakeSteerSamples / trailBrakingSamples;
-    trailScore = Math.round(50 + 55 * perfectRatio - 35 * highBrakeRatio);
-    trailScore = Math.max(0, Math.min(100, trailScore));
-  } else {
-    trailScore = 100;
-  }
-
-  let apexTimingText = "Ideal";
-  const minSpeedIndex = state.cornerSamples.findIndex(s => s.speedMs * 3.6 === minSpeedKmh);
-  const pct = minSpeedIndex / state.cornerSamples.length;
-  const insideDirection = state.currentCornerAngle > 0 ? 1 : -1;
-  const maxInsideDev = Math.max(...state.cornerSamples.map(s => s.trackPosLat * insideDirection));
-
-  if (maxInsideDev < 0.45) {
-    apexTimingText = "Longe do Ápice";
-  } else if (pct < 0.28) {
-    apexTimingText = "Ápice Cedo";
-  } else if (pct > 0.72) {
-    apexTimingText = "Ápice Atrasado";
-  } else {
-    apexTimingText = "Perfeito";
-  }
-
-  let totalEff = 0;
-  state.cornerSamples.forEach(s => {
-    const g = Math.sqrt(s.accG.x * s.accG.x + s.accG.z * s.accG.z);
-    const eff = g / state.maxObservedLatG;
-    totalEff += eff;
-  });
-  const avgGripUtil = Math.round((totalEff / state.cornerSamples.length) * 100);
-  const finalGripUtil = Math.min(100, Math.max(0, avgGripUtil));
-
-  const gripScore = Math.min(100, (finalGripUtil / 85) * 100);
-  const finalScore = Math.round((speedScore * 0.4) + (trailScore * 0.3) + (gripScore * 0.3));
-
-  let grade = "C";
   let gradeClass = "grade-blue";
-  if (finalScore >= 95) { grade = "S"; gradeClass = "grade-gold"; }
-  else if (finalScore >= 88) { grade = "A+"; gradeClass = "grade-green"; }
-  else if (finalScore >= 80) { grade = "A"; gradeClass = "grade-green"; }
-  else if (finalScore >= 70) { grade = "B"; gradeClass = "grade-blue"; }
-  else if (finalScore >= 60) { grade = "C"; gradeClass = "grade-blue"; }
-  else { grade = "D"; gradeClass = "grade-red"; }
+  if (scorecard.grade === "S") { gradeClass = "grade-gold"; }
+  else if (scorecard.grade.startsWith("A")) { gradeClass = "grade-green"; }
+  else if (scorecard.grade.startsWith("B")) { gradeClass = "grade-blue"; }
+  else if (scorecard.grade.startsWith("C")) { gradeClass = "grade-blue"; }
+  else { gradeClass = "grade-red"; }
 
-  scorecardGrade.innerText = grade;
+  scorecardGrade.innerText = scorecard.grade;
   scorecardGrade.className = gradeClass;
   
-  scorecardApexSpeed.innerText = `${Math.round(minSpeedKmh)} km/h (Ideal: ${Math.round(targetKmh)})`;
-  scorecardTrailScore.innerText = `${Math.round(trailScore)}%`;
-  scorecardApexTiming.innerText = apexTimingText;
-  scorecardGripUtil.innerText = `${Math.round(finalGripUtil)}%`;
+  scorecardApexSpeed.innerText = `${Math.round(scorecard.minSpeedKmh)} km/h (Ideal: ${Math.round(scorecard.targetSpeedKmh)})`;
+  scorecardTrailScore.innerText = `${Math.round(scorecard.trailScore)}%`;
+  scorecardApexTiming.innerText = scorecard.apexTiming;
+  scorecardGripUtil.innerText = `${Math.round(scorecard.gripUtilization)}%`;
 
   scorecardOverlay.classList.remove("scorecard-hidden");
 

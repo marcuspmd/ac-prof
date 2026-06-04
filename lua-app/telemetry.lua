@@ -31,7 +31,7 @@ function M.getTelemetry(carIndex)
   local upcomingTurn = ac.getTrackUpcomingTurn(carIndex or 0)
   local nextTurnDist = -1
   local nextTurnAngle = 0
-  if upcomingTurn then
+  if upcomingTurn and math.abs(upcomingTurn.y) >= 12 then
     nextTurnDist = upcomingTurn.x
     nextTurnAngle = upcomingTurn.y
   end
@@ -67,7 +67,7 @@ function M.getTelemetry(carIndex)
     maxObservedDecelG = physics.maxObservedDecelG or 1.0,
     voiceEnabled = config.voiceEnabled,
     drawEntryApexExit = config.drawEntryApexExit,
-    showSpeedHolograms = config.showSpeedHolograms
+    overlayOpacity = config.overlayOpacity
   }
 end
 

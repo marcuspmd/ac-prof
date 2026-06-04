@@ -3,14 +3,14 @@ local config = require('config')
 local M = {}
 
 -- Peak G-forces observed during the session (starts with sensible defaults)
-M.maxObservedLatG = 1.4
-M.maxObservedDecelG = 1.0
-M.maxObservedAccelG = 0.5
+M.maxObservedLatG = 0.9
+M.maxObservedDecelG = 0.8
+M.maxObservedAccelG = 0.3
 
 -- Smooth values for calibration (starts at baseline to prevent initial catch-up delay)
-M.smoothedLatG = 1.0
-M.smoothedDecelG = 0.8
-M.smoothedAccelG = 0.3
+M.smoothedLatG = 0.8
+M.smoothedDecelG = 0.7
+M.smoothedAccelG = 0.2
 
 -- Automatically calibrate session G limits based on vehicle behavior with spike filtering
 function M.updateGLimits(car)
@@ -55,7 +55,7 @@ function M.calculateTurnPhysics(car, upcomingTurn, roadGrip)
 
   if nextTurnDist > 0 then
     local absAngle = math.abs(nextTurnAngle)
-    local baseTargetKmh = 800 / math.sqrt(math.max(1.0, absAngle))
+    local baseTargetKmh = 3500 / (absAngle + 15) + 45
     baseTargetKmh = math.max(50, math.min(290, baseTargetKmh))
 
     local gripFactor = math.sqrt(math.max(0.1, roadGrip))

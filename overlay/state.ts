@@ -11,9 +11,9 @@ export interface CornerSample {
 
 export const state = {
   // Session dynamic G limits (calibrated via telemetry)
-  maxObservedLatG: 1.4,
-  maxObservedDecelG: 1.0,
-  maxObservedAccelG: 0.5,
+  maxObservedLatG: 0.9,
+  maxObservedDecelG: 0.8,
+  maxObservedAccelG: 0.3,
 
   // Corner tracking state
   inCorner: false,
@@ -31,6 +31,6 @@ export const state = {
   // Configuration settings synced from Lua
   voiceEnabled: false,
   drawEntryApexExit: true,
-  showSpeedHolograms: true,
+  overlayOpacity: 0.75,
 };
 

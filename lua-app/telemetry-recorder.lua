@@ -15,6 +15,28 @@ local lastResetCounter = 0
 local sampleTimer = 0
 local sampleInterval = 0.1 -- 10Hz recording
 
+-- Session buffers & metrics
+local sessionLaps = {}
+local sessionTimestamp = nil
+local sessionFilename = nil
+local sessionBestLatG = 0
+local sessionBestDecelG = 0
+
+local function initSession()
+  if sessionTimestamp then return end
+  
+  sessionTimestamp = os.date("%Y-%m-%d %H:%M:%S")
+  local safeTimestamp = os.date("%Y%m%d_%H%M%S")
+  local safeTrack = (ac.getTrackID() or "track"):gsub("[^%w%-_]", "_")
+  local safeCar = (ac.getCarID(0) or "car"):gsub("[^%w%-_]", "_")
+  
+  local scriptDir = ac.getFolder(ac.FolderID.ScriptOrigin):gsub("\\", "/")
+  local logDir = scriptDir .. "/telemetry_logs"
+  io.createDir(logDir)
+  
+  sessionFilename = string.format("%s/telemetry_%s_%s_session_%s.json", logDir, safeTrack, safeCar, safeTimestamp)
+end
+
 -- Buffers for the current lap
 local lapSamples = {}
 local lapCorners = {}
@@ -181,7 +203,7 @@ local function processCornerStats(samples, cornerAngle, maxObservedLatG)
   local minSpeedKmh = minSpeedMs * 3.6
 
   local absAngle = math.abs(cornerAngle)
-  local baseTargetKmh = 800 / math.sqrt(math.max(1.0, absAngle))
+  local baseTargetKmh = 3500 / (absAngle + 15) + 45
   baseTargetKmh = math.max(50, math.min(290, baseTargetKmh))
   local gripFactor = math.sqrt(math.max(0.1, samples[1].roadGrip))
   local carPerformanceFactor = math.min(1.25, math.sqrt(maxObservedLatG / 1.4))
@@ -285,9 +307,11 @@ local function processCornerStats(samples, cornerAngle, maxObservedLatG)
   }
 end
 
--- Saves the recorded telemetry data of a lap to a JSON file
-local function saveTelemetryFile(lapNumber, lapTimeMs)
+-- Saves the accumulated session telemetry data to a JSON file
+local function saveSessionFile(lapNumber, lapTimeMs)
   if #lapSamples == 0 then return end
+
+  initSession()
 
   -- Calculate sector split times from cumulative sectorEndTimes
   local finalSectors = {}
@@ -303,6 +327,27 @@ local function saveTelemetryFile(lapNumber, lapTimeMs)
     table.insert(finalSectors, lapTimeMs)
   end
 
+  -- Update session bests
+  if physics.maxObservedLatG > sessionBestLatG then
+    sessionBestLatG = physics.maxObservedLatG
+  end
+  if physics.maxObservedDecelG > sessionBestDecelG then
+    sessionBestDecelG = physics.maxObservedDecelG
+  end
+
+  local lapData = {
+    lapNumber = lapNumber,
+    lapTimeMs = lapTimeMs,
+    sectorTimes = finalSectors,
+    timestamp = os.date("%Y-%m-%d %H:%M:%S"),
+    bestLatG = round(physics.maxObservedLatG * 100) / 100,
+    bestDecelG = round(physics.maxObservedDecelG * 100) / 100,
+    corners = lapCorners,
+    samples = lapSamples
+  }
+
+  table.insert(sessionLaps, lapData)
+
   local sessionData = {
     metadata = {
       trackId = ac.getTrackID() or "unknown",
@@ -310,16 +355,13 @@ local function saveTelemetryFile(lapNumber, lapTimeMs)
       trackLayout = ac.getTrackLayout() or "",
       carId = ac.getCarID(0) or "unknown",
       carName = ac.getCarName(0) or "Unknown Car",
-      lapNumber = lapNumber,
-      lapTimeMs = lapTimeMs,
-      sectorTimes = finalSectors,
-      timestamp = os.date("%Y-%m-%d %H:%M:%S"),
-      bestLatG = round(physics.maxObservedLatG * 100) / 100,
-      bestDecelG = round(physics.maxObservedDecelG * 100) / 100
+      timestamp = sessionTimestamp,
+      bestLatG = round(sessionBestLatG * 100) / 100,
+      bestDecelG = round(sessionBestDecelG * 100) / 100,
+      totalLaps = #sessionLaps
     },
     trackMap = trackMap,
-    corners = lapCorners,
-    samples = lapSamples
+    laps = sessionLaps
   }
 
   local success, jsonStr = pcall(JSON.stringify, sessionData)
@@ -328,21 +370,14 @@ local function saveTelemetryFile(lapNumber, lapTimeMs)
     return
   end
 
-  local scriptDir = ac.getFolder(ac.FolderID.ScriptOrigin):gsub("\\", "/")
-  local logDir = scriptDir .. "/telemetry_logs"
-  io.createDir(logDir)
-
-  local safeTrack = (ac.getTrackID() or "track"):gsub("[^%w%-_]", "_")
-  local safeCar = (ac.getCarID(0) or "car"):gsub("[^%w%-_]", "_")
-  local filename = string.format("%s/telemetry_%s_%s_lap_%d.json", logDir, safeTrack, safeCar, lapNumber)
-
-  local saveSuccess = io.save(filename, jsonStr)
-  if saveSuccess then
-    ac.log("[Telemetry Recorder] Saved lap telemetry to: " .. filename)
-    ac.setMessage("Race Coach", string.format("Telemetria da volta %d gravada com sucesso!", lapNumber))
-  else
-    ac.log("[Telemetry Recorder] Failed to save telemetry file: " .. filename)
-  end
+  io.saveAsync(sessionFilename, jsonStr, function(err)
+    if err then
+      ac.log("[Telemetry Recorder] Failed to save session telemetry file: " .. tostring(err))
+    else
+      ac.log("[Telemetry Recorder] Saved session telemetry to: " .. sessionFilename)
+      ac.setMessage("Race Coach", string.format("Telemetria da volta %d gravada na sessão!", lapNumber))
+    end
+  end)
 end
 
 -- Corner tracking state for the current lap
@@ -350,11 +385,18 @@ local inCorner = false
 local cornerStartDist = -1
 local cornerAngle = 0
 local currentCornerSamples = {}
+local cornerStartTelemetryIndex = 0
+local cornerStartProgress = 0
+local cornerEntered = false
+local cornerExitTimer = 0
 
 -- Main recorder update loop
 function M.update(dt)
   local car = ac.getCar(0)
   if not car then return end
+
+  -- Initialize session if not done yet
+  initSession()
 
   -- 1. Initialize track map once if needed
   if not trackMap then
@@ -379,7 +421,7 @@ function M.update(dt)
   if car.lapCount > lastLapCount then
     -- Save the telemetry for the completed lap if we have enough samples
     if #lapSamples > 50 and lastLapCount > 0 then
-      saveTelemetryFile(lastLapCount, car.previousLapTimeMs)
+      saveSessionFile(lastLapCount, car.previousLapTimeMs)
     end
     
     -- Clear buffers for the new lap
@@ -402,36 +444,46 @@ function M.update(dt)
 
   -- 5. Track corners for scorecard computation
   local upcomingTurn = ac.getTrackUpcomingTurn(0)
+  if upcomingTurn and math.abs(upcomingTurn.y) < 12 then
+    upcomingTurn = nil
+  end
   local dist = upcomingTurn and upcomingTurn.x or -1
   local angle = upcomingTurn and upcomingTurn.y or 0
 
-  if dist > 0 and dist < 80 then
-    if not inCorner then
+  if not inCorner then
+    if dist > 0 and dist < 80 then
       inCorner = true
       cornerStartDist = dist
       cornerAngle = angle
       currentCornerSamples = {}
+      cornerStartTelemetryIndex = #lapSamples
+      cornerStartProgress = car.splinePosition
+      cornerEntered = false
+      cornerExitTimer = 0
     end
-    
-    -- Calculate details for corner scorecard
-    local wheels = {}
-    for i = 0, 3 do
-      local tyre = car.wheels[i]
-      if tyre then
-        table.insert(wheels, {
-          slipAngle = tyre.slipAngle,
-          slipRatio = tyre.slipRatio,
-          load = tyre.load,
-          ndSlip = tyre.ndSlip
-        })
-      else
-        table.insert(wheels, { slipAngle = 0, slipRatio = 0, load = 0, ndSlip = 0 })
+  else
+    -- We are in the corner tracking phase
+    local sim = ac.getSim()
+    local trackLength = sim and sim.trackLengthM or 1.0
+    local diffProgress = car.splinePosition - cornerStartProgress
+    if diffProgress > 0.5 then
+      diffProgress = diffProgress - 1.0
+    elseif diffProgress < -0.5 then
+      diffProgress = diffProgress + 1.0
+    end
+    local distTraveled = diffProgress * trackLength
+
+    -- Check if we entered the corner
+    if not cornerEntered then
+      if dist <= 0 or distTraveled > cornerStartDist then
+        cornerEntered = true
       end
     end
-    
+
+    -- Collect corner sample
     local trackPos = ac.worldCoordinateToTrack(car.position)
     local trackPosLat = trackPos and trackPos.x or 0
-    
+
     table.insert(currentCornerSamples, {
       speedMs = car.speedMs,
       roadGrip = ac.getSim() and ac.getSim().roadGrip or 1.0,
@@ -443,15 +495,46 @@ function M.update(dt)
       steer = car.steer,
       trackPosLat = trackPosLat
     })
-  elseif inCorner and (dist <= 0 or dist > cornerStartDist + 50) then
-    inCorner = false
-    local scorecard = processCornerStats(currentCornerSamples, cornerAngle, physics.maxObservedLatG)
-    if scorecard then
-      scorecard.startIndex = #lapSamples - #currentCornerSamples + 1
-      scorecard.endIndex = #lapSamples
-      table.insert(lapCorners, scorecard)
+
+    -- Check corner exit condition
+    local shouldExit = false
+    if distTraveled > 200 then
+      shouldExit = true
+    elseif cornerEntered and distTraveled > 30 then
+      local steerNormalized = 0
+      if car.steerLock and car.steerLock > 0 then
+        steerNormalized = car.steer / car.steerLock
+      end
+      local isStraight = math.abs(car.acceleration.x) < 0.20 and math.abs(steerNormalized) < 0.10
+      if isStraight then
+        cornerExitTimer = cornerExitTimer + dt
+        if cornerExitTimer >= 0.4 then
+          shouldExit = true
+        end
+      else
+        cornerExitTimer = 0
+      end
     end
-    currentCornerSamples = {}
+
+    -- Chicane / successive corner check
+    if not shouldExit and dist > 0 and dist < 80 and distTraveled > 30 then
+      local isNewCorner = (sign(angle) ~= sign(cornerAngle)) or (dist > 30)
+      if isNewCorner then
+        shouldExit = true
+      end
+    end
+
+    if shouldExit then
+      inCorner = false
+      local scorecard = processCornerStats(currentCornerSamples, cornerAngle, physics.maxObservedLatG)
+      currentCornerSamples = {}
+      if scorecard then
+        scorecard.startIndex = cornerStartTelemetryIndex
+        scorecard.endIndex = math.max(cornerStartTelemetryIndex, #lapSamples - 1)
+        table.insert(lapCorners, scorecard)
+        return scorecard
+      end
+    end
   end
 
   -- 6. Collect 10Hz telemetry samples (only record when car is moving)
@@ -492,6 +575,10 @@ function M.update(dt)
       local trackPos = ac.worldCoordinateToTrack(car.position)
       local trackPosLat = trackPos and trackPos.x or 0
       
+      local sim = ac.getSim()
+      local trackTemp = sim and round(sim.roadTemperature * 10) / 10 or 0
+      local ambTemp = sim and round(sim.ambientTemperature * 10) / 10 or 0
+      
       -- Understeer / oversteer / spin / lockup detections
       local undVal = checkUndersteer(car, avgFrontSlip, avgRearSlip)
       local oveVal = checkOversteer(car, avgRearSlip)
@@ -518,7 +605,21 @@ function M.update(dt)
         und = undVal > 0 and undVal or nil,
         ove = oveVal > 0 and oveVal or nil,
         spin = spinVal > 0 and spinVal or nil,
-        lock = lockVal > 0 and lockVal or nil
+        lock = lockVal > 0 and lockVal or nil,
+        tCore = {
+          car.wheels[0] and round(car.wheels[0].tyreCoreTemperature) or 0,
+          car.wheels[1] and round(car.wheels[1].tyreCoreTemperature) or 0,
+          car.wheels[2] and round(car.wheels[2].tyreCoreTemperature) or 0,
+          car.wheels[3] and round(car.wheels[3].tyreCoreTemperature) or 0
+        },
+        tGrip = {
+          car.wheels[0] and round(car.wheels[0].surfaceGrip * 100) / 100 or 0,
+          car.wheels[1] and round(car.wheels[1].surfaceGrip * 100) / 100 or 0,
+          car.wheels[2] and round(car.wheels[2].surfaceGrip * 100) / 100 or 0,
+          car.wheels[3] and round(car.wheels[3].surfaceGrip * 100) / 100 or 0
+        },
+        rTemp = trackTemp,
+        aTemp = ambTemp
       }
       
       table.insert(lapSamples, sample)

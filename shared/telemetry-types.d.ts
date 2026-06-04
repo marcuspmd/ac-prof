@@ -32,6 +32,6 @@ interface TelemetryData {
   maxObservedDecelG: number; // Calibração de desaceleração G máxima do Lua
   voiceEnabled?: boolean;
   drawEntryApexExit?: boolean;
-  showSpeedHolograms?: boolean;
+  overlayOpacity?: number;
 }
 

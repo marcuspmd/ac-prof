@@ -3,7 +3,7 @@ import { state } from './state';
 import { updateGGDiagram, initGG } from './gg-diagram';
 import { drawInputsTrace, initTrace } from './inputs-trace';
 import { setTyreVisual, checkSteeringScrub } from './tyre-slip';
-import { updateUpcomingTurn, analyzePhysics, processCornerStats, initUpcomingTurn } from './upcoming-turn';
+import { updateUpcomingTurn, analyzePhysics, displayCornerScorecard, initUpcomingTurn } from './upcoming-turn';
 
 const mode = window.location.hash ? window.location.hash.substring(1) : "full";
 document.body.className = `mode-${mode}`;
@@ -21,6 +21,8 @@ let tyreFL: HTMLElement | null = null;
 let tyreFR: HTMLElement | null = null;
 let tyreRL: HTMLElement | null = null;
 let tyreRR: HTMLElement | null = null;
+let speedWidgetActual: HTMLElement | null = null;
+let speedWidgetTarget: HTMLElement | null = null;
 
 function initDOM(): void {
   speedIndicator = document.getElementById("speed-indicator");
@@ -34,6 +36,8 @@ function initDOM(): void {
   tyreFR = document.getElementById("tyre-fr");
   tyreRL = document.getElementById("tyre-rl");
   tyreRR = document.getElementById("tyre-rr");
+  speedWidgetActual = document.getElementById("speed-widget-actual");
+  speedWidgetTarget = document.getElementById("speed-widget-target");
 
   initGG();
   initTrace();
@@ -81,8 +85,11 @@ function updateTrackPositionWidget(data: TelemetryData): void {
 declare global {
   interface Window {
     onTelemetryUpdate: (data: TelemetryData) => void;
+    onCornerCompleted: (scorecard: any) => void;
   }
 }
+
+window.onCornerCompleted = displayCornerScorecard;
 
 let updateCount = 0;
 
@@ -106,7 +113,8 @@ window.onTelemetryUpdate = function(data: TelemetryData): void {
   // Sync configurations from Lua telemetry
   state.voiceEnabled = data.voiceEnabled ?? false;
   state.drawEntryApexExit = data.drawEntryApexExit ?? true;
-  state.showSpeedHolograms = data.showSpeedHolograms ?? true;
+  state.overlayOpacity = data.overlayOpacity ?? 0.75;
+  document.documentElement.style.setProperty('--overlay-opacity', state.overlayOpacity.toString());
 
   // Calibrate acceleration G max (kept local as it's not physical grip capacity)
   const currentAccelG = data.accG.z;
@@ -168,27 +176,55 @@ window.onTelemetryUpdate = function(data: TelemetryData): void {
   // Front tire scrub check
   checkSteeringScrub(data.speedMs, data.steer, data.tyres[0].slipAngle, data.tyres[1].slipAngle);
 
-  // Corner Scorecard telemetry accumulator
-  const dist = data.nextTurnDist;
-  const angle = data.nextTurnAngle;
-  if (dist > 0 && dist < 80) {
-    if (!state.inCorner) {
-      state.inCorner = true;
-      state.cornerSamples = [];
-      state.currentCornerStartDist = dist;
-      state.currentCornerAngle = angle;
+  // Update new speed widget
+  if (speedWidgetActual || speedWidgetTarget) {
+    const actualKmh = data.speedKmh;
+    
+    // Calculate target speed using new formula
+    const dist = data.nextTurnDist;
+    const angle = data.nextTurnAngle;
+    let vTargetKmh = 0;
+    
+    if (dist > 0) {
+      const absAngle = Math.abs(angle);
+      let baseTargetKmh = 3500 / (absAngle + 15) + 45;
+      baseTargetKmh = Math.max(50, Math.min(290, baseTargetKmh));
+      const gripFactor = Math.sqrt(Math.max(0.1, data.roadGrip));
+      const carPerformanceFactor = Math.min(1.25, Math.sqrt(state.maxObservedLatG / 1.4));
+      vTargetKmh = baseTargetKmh * gripFactor * carPerformanceFactor;
+      
+      // Track positioning penalty
+      const pLat = data.trackPosLat;
+      const isRight = angle > 0;
+      const wrongSideFactor = isRight ? pLat : -pLat;
+      if (dist < 60 && wrongSideFactor > 0) {
+        const proximityScale = (60 - dist) / 60;
+        vTargetKmh = vTargetKmh * (1.0 - 0.2 * wrongSideFactor * proximityScale);
+      }
     }
-    state.cornerSamples.push({
-      speedMs: data.speedMs,
-      roadGrip: data.roadGrip,
-      accG: { x: data.accG.x, z: data.accG.z },
-      brake: data.brake,
-      steer: data.steer,
-      trackPosLat: data.trackPosLat
-    });
-  } else if (state.inCorner && (dist <= 0 || dist > state.currentCornerStartDist + 50)) {
-    state.inCorner = false;
-    processCornerStats();
+
+    if (speedWidgetActual) {
+      speedWidgetActual.innerText = Math.round(actualKmh).toString();
+      if (dist > 0) {
+        if (actualKmh > vTargetKmh + 15) {
+          speedWidgetActual.style.color = "#ef4444"; // Red
+        } else if (actualKmh > vTargetKmh + 5) {
+          speedWidgetActual.style.color = "#f59e0b"; // Yellow
+        } else {
+          speedWidgetActual.style.color = "#10b981"; // Green
+        }
+      } else {
+        speedWidgetActual.style.color = "#ffffff"; // White on straights
+      }
+    }
+    
+    if (speedWidgetTarget) {
+      if (dist > 0) {
+        speedWidgetTarget.innerText = Math.round(vTargetKmh).toString();
+      } else {
+        speedWidgetTarget.innerText = "--";
+      }
+    }
   }
 };
 
@@ -196,6 +232,7 @@ window.onTelemetryUpdate = function(data: TelemetryData): void {
 function startMockSimulation(): void {
   console.log("[Overlay] Iniciando Simulador de Telemetria Integrado...");
   let mockDistance = 0;
+  let lastMockDistance = 0;
   let mockSpeedMs = 60;
   let mockSteer = 0;
   let mockThrottle = 1.0;
@@ -205,6 +242,21 @@ function startMockSimulation(): void {
 
   setInterval(() => {
     mockDistance += mockSpeedMs * 0.0167;
+    
+    // Corner exit mock scorecard trigger
+    if (lastMockDistance < 370 && mockDistance >= 370) {
+      const mockScorecard = {
+        grade: "A",
+        minSpeedKmh: 84,
+        targetSpeedKmh: 80,
+        trailScore: 88,
+        apexTiming: "Perfeito",
+        gripUtilization: 82
+      };
+      window.onCornerCompleted(mockScorecard);
+    }
+    lastMockDistance = mockDistance;
+
     if (mockDistance > 800) {
       mockDistance = 0;
       mockSpeedMs = 50;
@@ -322,7 +374,7 @@ function startMockSimulation(): void {
       maxObservedDecelG: 1.0,
       voiceEnabled: true,
       drawEntryApexExit: true,
-      showSpeedHolograms: true
+      overlayOpacity: 0.75
     };
 
     window.onTelemetryUpdate(mockData);
