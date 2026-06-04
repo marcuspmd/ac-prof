@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Race Coach Overlay</title>
+  <!-- Google Fonts para tipografia premium -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="overlay-container" class="glassmorphism">
+    <!-- Cabeçalho / Informações Gerais -->
+    <header class="app-header">
+      <h1 class="app-title">RACE COACH</h1>
+      <div id="delta-display" class="delta-neutral">--.---</div>
+    </header>
+
+    <!-- Área Principal de Telemetria -->
+    <main class="telemetry-grid">
+      <!-- Painel de Velocidade e Marcha -->
+      <section class="gauge-panel panel-glass">
+        <div class="gear-container">
+          <span id="gear-indicator">N</span>
+        </div>
+        <div class="speed-container">
+          <span id="speed-indicator">0</span>
+          <span class="speed-unit">km/h</span>
+        </div>
+        <div class="rpm-bar-container">
+          <div id="rpm-bar" class="rpm-bar-fill"></div>
+        </div>
+      </section>
+
+      <!-- Diagrama G-G (Círculo de Aderência) -->
+      <section class="gg-panel panel-glass">
+        <h2 class="panel-title">G-G DIAGRAM</h2>
+        <div class="canvas-wrapper">
+          <canvas id="gg-canvas" width="150" height="150"></canvas>
+        </div>
+      </section>
+
+      <!-- Pedais e Slip dos Pneus -->
+      <section class="inputs-panel panel-glass">
+        <h2 class="panel-title">INPUTS & SLIP</h2>
+        <div class="pedals-wrapper">
+          <!-- Throttle -->
+          <div class="pedal-channel">
+            <span class="pedal-label">THR</span>
+            <div class="pedal-bar">
+              <div id="throttle-bar" class="pedal-fill throttle-fill"></div>
+            </div>
+          </div>
+          <!-- Brake -->
+          <div class="pedal-channel">
+            <span class="pedal-label">BRK</span>
+            <div class="pedal-bar">
+              <div id="brake-bar" class="pedal-fill brake-fill"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Escorregamento dos Pneus (Tyre Slip) -->
+        <div class="tyres-grid">
+          <div class="tyre-indicator FL" id="tyre-fl"><span class="tyre-label">FL</span></div>
+          <div class="tyre-indicator FR" id="tyre-fr"><span class="tyre-label">FR</span></div>
+          <div class="tyre-indicator RL" id="tyre-rl"><span class="tyre-label">RL</span></div>
+          <div class="tyre-indicator RR" id="tyre-rr"><span class="tyre-label">RR</span></div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Área de Coaching & Alertas -->
+    <footer id="coach-panel" class="coach-neutral">
+      <div class="coach-icon">🎙️</div>
+      <div class="coach-message-container">
+        <span class="coach-header">RACE ENGINEER FEEDBACK</span>
+        <span id="coach-message">Aguardando telemetria na pista...</span>
+      </div>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

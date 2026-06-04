@@ -1,0 +1,23 @@
+{
+  "name": "race-coach-overlay",
+  "version": "1.0.0",
+  "description": "Smart overlay and racing coach for Assetto Corsa.",
+  "main": "lua-app/race-coach-overlay.lua",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "zip": "mkdir -p apps/lua/race-coach-overlay && cp -r lua-app/* apps/lua/race-coach-overlay/ && mkdir -p apps/lua/race-coach-overlay/overlay && cp overlay/index.html overlay/style.css overlay/app.js apps/lua/race-coach-overlay/overlay/ && python3 -m zipfile -c race-coach-overlay.zip apps/ && rm -rf apps/"
+  },
+  "keywords": [
+    "assetto-corsa",
+    "csp",
+    "telemetry",
+    "racing-coach",
+    "overlay"
+  ],
+  "author": "Marcus Paulo Mazzon Dias",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

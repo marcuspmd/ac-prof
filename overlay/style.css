@@ -1,0 +1,303 @@
+/* Reset e Configurações Gerais */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Outfit', sans-serif;
+  color: #f3f4f6;
+  background-color: transparent; /* Permite fundo transparente no jogo */
+  width: 400px;
+  height: 300px;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* Glassmorphism Container principal */
+.glassmorphism {
+  background: rgba(17, 24, 39, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  width: 100%;
+  height: 100%;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+/* Header */
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding-bottom: 6px;
+}
+
+.app-title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+#delta-display {
+  font-size: 14px;
+  font-family: monospace;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.delta-neutral { color: #9ca3af; background: rgba(156, 163, 175, 0.1); }
+.delta-positive { color: #10b981; background: rgba(16, 185, 129, 0.15); }
+.delta-negative { color: #ef4444; background: rgba(239, 68, 68, 0.15); }
+
+/* Grid de Telemetria */
+.telemetry-grid {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 1.3fr;
+  gap: 8px;
+  margin: 8px 0;
+  flex-grow: 1;
+}
+
+.panel-glass {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.panel-title {
+  font-size: 9px;
+  font-weight: 600;
+  color: #9ca3af;
+  letter-spacing: 1px;
+  margin-bottom: 4px;
+  text-align: center;
+  width: 100%;
+}
+
+/* Painel de Velocidade e Marcha */
+.gauge-panel {
+  justify-content: center;
+  position: relative;
+}
+
+.gear-container {
+  font-size: 42px;
+  font-weight: 700;
+  line-height: 1;
+  color: #3b82f6;
+  text-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
+}
+
+.speed-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 4px;
+}
+
+#speed-indicator {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.speed-unit {
+  font-size: 8px;
+  color: #6b7280;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+.rpm-bar-container {
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.rpm-bar-fill {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, #10b981, #ef4444);
+  transition: width 0.05s linear;
+}
+
+/* Painel G-G */
+.gg-panel {
+  justify-content: center;
+}
+
+.canvas-wrapper {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 50%;
+  padding: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+#gg-canvas {
+  display: block;
+}
+
+/* Painel de Inputs & Slip */
+.inputs-panel {
+  align-items: stretch;
+}
+
+.pedals-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.pedal-channel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pedal-label {
+  font-size: 8px;
+  font-weight: 600;
+  color: #9ca3af;
+  width: 20px;
+}
+
+.pedal-bar {
+  flex-grow: 1;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.pedal-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 3px;
+  transition: width 0.05s ease-out;
+}
+
+.throttle-fill {
+  background: #10b981;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.4);
+}
+
+.brake-fill {
+  background: #ef4444;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.4);
+}
+
+/* Tyres Grid */
+.tyres-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.tyre-indicator {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.1s ease;
+}
+
+.tyre-label {
+  font-size: 8px;
+  font-weight: 600;
+  color: #6b7280;
+}
+
+/* Alertas de Tyre Slip */
+.tyre-slip-low {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+.tyre-slip-low .tyre-label { color: #10b981; }
+
+.tyre-slip-mid {
+  background: rgba(245, 158, 11, 0.2);
+  border-color: rgba(245, 158, 11, 0.5);
+  box-shadow: 0 0 4px rgba(245, 158, 11, 0.2);
+}
+.tyre-slip-mid .tyre-label { color: #f59e0b; }
+
+.tyre-slip-high {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: rgba(239, 68, 68, 0.6);
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
+}
+.tyre-slip-high .tyre-label { color: #ef4444; }
+
+/* Rodapé de Coaching */
+#coach-panel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  padding-top: 8px;
+  min-height: 48px;
+}
+
+.coach-icon {
+  font-size: 20px;
+  animation: pulse 2s infinite ease-in-out;
+}
+
+.coach-message-container {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-grow: 1;
+}
+
+.coach-header {
+  font-size: 8px;
+  font-weight: 700;
+  color: #3b82f6;
+  letter-spacing: 1px;
+}
+
+#coach-message {
+  font-size: 11px;
+  font-weight: 400;
+  color: #d1d5db;
+  line-height: 1.2;
+}
+
+/* Alertas do Coach */
+.coach-neutral #coach-message { color: #d1d5db; }
+.coach-warning #coach-message { color: #f59e0b; font-weight: 600; }
+.coach-danger #coach-message { color: #ef4444; font-weight: 600; }
+.coach-success #coach-message { color: #10b981; font-weight: 600; }
+
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.05); opacity: 1; }
+  100% { transform: scale(1); opacity: 0.8; }
+}
