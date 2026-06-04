@@ -3,6 +3,7 @@ local physics = require('physics-calc')
 local uiBrowser = require('ui-browser')
 local painter = require('track-painter')
 local recorder = require('telemetry-recorder')
+local config = require('config')
 
 
 local function log(msg)
@@ -52,6 +53,62 @@ function windowColors(dt)
   end
   uiBrowser.updateAndDraw(browserColors, trackerColors)
 end
+
+-- Control Panel Window (Native ImGui Interface)
+function windowSettings(dt)
+  ui.toolWindow('RaceCoachSettings', vec2(100, 100), vec2(320, 220), false, true, function()
+    ui.pushFont(ui.Font.Title)
+    ui.text("Race Coach - Configurações")
+    ui.popFont()
+    
+    ui.separator()
+    ui.offsetCursorY(8)
+    
+    if ui.checkbox("Ativar Vozes (Feedback de Áudio)", config.voiceEnabled) then
+      config.voiceEnabled = not config.voiceEnabled
+    end
+    ui.textColored("Ativa o feedback falado em tempo real sobre frenagem, curvas e erros.", rgbm(0.6, 0.6, 0.6, 1.0))
+    
+    ui.offsetCursorY(8)
+    
+    if ui.checkbox("Desenhar Entrada, Ápice e Saída na Pista", config.drawEntryApexExit) then
+      config.drawEntryApexExit = not config.drawEntryApexExit
+    end
+    ui.textColored("Mostra linhas e marcações no asfalto nos pontos cruciais da curva.", rgbm(0.6, 0.6, 0.6, 1.0))
+    
+    ui.offsetCursorY(8)
+    
+    if ui.checkbox("Mostrar Holograma de Velocidade (Ideal vs Atual)", config.showSpeedHolograms) then
+      config.showSpeedHolograms = not config.showSpeedHolograms
+    end
+    ui.textColored("Projeta a velocidade atual e a ideal no ponto de frenagem da curva.", rgbm(0.6, 0.6, 0.6, 1.0))
+  end)
+end
+
+-- Register settings panel in Content Manager / AC side bar settings context
+ui.addSettings({
+  name = "Race Coach",
+  id = "RaceCoachSettingsPanel",
+  icon = ui.Icons.Settings,
+  size = {
+    default = vec2(320, 220),
+    min = vec2(250, 150)
+  }
+}, function()
+  ui.header("Geral")
+  if ui.checkbox("Ativar Vozes do Engenheiro", config.voiceEnabled) then
+    config.voiceEnabled = not config.voiceEnabled
+  end
+  ui.offsetCursorY(5)
+  if ui.checkbox("Marcar Entrada, Ápice e Saída", config.drawEntryApexExit) then
+    config.drawEntryApexExit = not config.drawEntryApexExit
+  end
+  ui.offsetCursorY(5)
+  if ui.checkbox("Holograma de Velocidade", config.showSpeedHolograms) then
+    config.showSpeedHolograms = not config.showSpeedHolograms
+  end
+end)
+
 
 -- Main physics loop updates and 3D track painter drawings
 function script.update(dt)

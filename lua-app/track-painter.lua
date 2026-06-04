@@ -1,4 +1,5 @@
 -- 3D Track Paint rendering for Race Coach Overlay
+local config = require('config')
 local M = {}
 
 local trackPainter = ac.TrackPaint()
@@ -132,17 +133,94 @@ function M.drawRacingLine(car, sim, nextTurnDist, nextTurnAngle, vTarget, totalB
     end
   end
 
-  -- 4. Draw circle on the physical apex of the turn
+  -- Helper functions for 3D track markings
+  local function drawTrackCrossLine(p, color, thickness)
+    local widths = ac.getTrackAISplineSides(p)
+    local pos = ac.trackProgressToWorldCoordinate(p, true)
+    local dp = 0.0001
+    local posNext = ac.trackProgressToWorldCoordinate(p + dp, true)
+    local tangent = posNext - pos
+    tangent.y = 0
+    local perpendicular = vec3(-tangent.z, 0, tangent.x):normalize()
+    local leftPos = pos + perpendicular * widths.x
+    local rightPos = pos - perpendicular * widths.y
+    
+    trackPainter:line(leftPos, rightPos, color, thickness)
+  end
+
+  local function drawTrackLabel(p, text, color)
+    local pos = ac.trackProgressToWorldCoordinate(p, true)
+    local dp = 0.0001
+    local posNext = ac.trackProgressToWorldCoordinate(p + dp, true)
+    local tangent = posNext - pos
+    tangent.y = 0
+    
+    local textAngle = math.deg(math.atan2(tangent.x, tangent.z)) - 90
+    
+    -- Lift slightly off the ground to prevent Z-fighting/clipping
+    local textPos = pos + vec3(0, 0.08, 0)
+    
+    -- Center text on the track line, size 5.0m wide by 1.2m high
+    trackPainter:text("Arial", text, textPos, vec2(5.0, 1.2), textAngle, color)
+  end
+
+  -- 4. Draw Entry, Apex, Exit markings and Speed Holograms
   if nextTurnDist > 0 and nextTurnDist < 100 then
     local apexProgress = car.splinePosition + nextTurnDist / trackLength
     if apexProgress > 1.0 then apexProgress = apexProgress - 1.0 end
     local apexWorldPos = ac.trackProgressToWorldCoordinate(apexProgress, true)
 
-    local apexColor = rgbm(1, 0.8, 0, 0.8) -- Gold/Yellow
-    if nextTurnDist < 15 then
-      apexColor = rgbm(0, 0.9, 0.2, 0.8) -- Light Green when passing the apex
+    local entryDist = math.max(30, totalBrakingDistanceNeeded)
+    local entryProgress = apexProgress - entryDist / trackLength
+    if entryProgress < 0.0 then entryProgress = entryProgress + 1.0 end
+
+    -- Draw Entry, Apex, Exit points
+    if config.drawEntryApexExit then
+      -- Entry point (Red line and label)
+      drawTrackCrossLine(entryProgress, rgbm(1.0, 0.2, 0.2, 0.8), 0.4)
+      drawTrackLabel(entryProgress, "ENTRADA", rgbm(1.0, 0.2, 0.2, 0.8))
+
+      -- Apex point (Gold circle and label)
+      local apexColor = rgbm(1, 0.8, 0, 0.8) -- Gold/Yellow
+      if nextTurnDist < 15 then
+        apexColor = rgbm(0, 0.9, 0.2, 0.8) -- Light Green when passing the apex
+      end
+      trackPainter:circle(apexWorldPos, 1.2, false, apexColor)
+      drawTrackLabel(apexProgress, "APICE", apexColor)
+
+      -- Exit point (Green line and label)
+      local exitProgress = apexProgress + 30 / trackLength
+      if exitProgress > 1.0 then exitProgress = exitProgress - 1.0 end
+      drawTrackCrossLine(exitProgress, rgbm(0.2, 1.0, 0.2, 0.8), 0.4)
+      drawTrackLabel(exitProgress, "SAIDA", rgbm(0.2, 1.0, 0.2, 0.8))
     end
-    trackPainter:circle(apexWorldPos, 1.2, false, apexColor)
+
+    -- Draw Speed Holograms before the entry point
+    if config.showSpeedHolograms then
+      local p_actual = entryProgress - 8 / trackLength
+      if p_actual < 0.0 then p_actual = p_actual + 1.0 end
+
+      local p_ideal = entryProgress - 4 / trackLength
+      if p_ideal < 0.0 then p_ideal = p_ideal + 1.0 end
+
+      local actualKmh = car.speedMs * 3.6
+      local idealKmh = vTarget * 3.6
+      local actualColor = rgbm(1, 1, 1, 0.8)
+
+      if actualKmh <= idealKmh + 5 then
+        actualColor = rgbm(0.2, 1.0, 0.2, 0.8) -- Green
+      elseif actualKmh <= idealKmh + 15 then
+        actualColor = rgbm(1.0, 0.8, 0.2, 0.8) -- Yellow
+      else
+        actualColor = rgbm(1.0, 0.2, 0.2, 0.8) -- Red
+      end
+
+      local actualText = string.format("ATUAL: %.0f km/h", actualKmh)
+      local idealText = string.format("IDEAL: %.0f km/h", idealKmh)
+
+      drawTrackLabel(p_actual, actualText, actualColor)
+      drawTrackLabel(p_ideal, idealText, rgbm(0.2, 0.8, 1.0, 0.8)) -- Cyan
+    end
   end
 end
 

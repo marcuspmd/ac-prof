@@ -28,4 +28,10 @@ interface TelemetryData {
   nextTurnAngle: number;  // Ângulo da curva em graus (positivo = esquerda, negativo = direita)
   roadGrip: number;       // Nível de aderência da pista (0.0 a 1.0)
   trackPosLat: number;    // Posição lateral do carro na pista (-1.0 = esquerda, 1.0 = direita, 0.0 = centro)
+  maxObservedLatG: number;   // Calibração de força G lateral máxima do Lua
+  maxObservedDecelG: number; // Calibração de desaceleração G máxima do Lua
+  voiceEnabled?: boolean;
+  drawEntryApexExit?: boolean;
+  showSpeedHolograms?: boolean;
 }
+

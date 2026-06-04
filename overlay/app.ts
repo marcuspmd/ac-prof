@@ -99,19 +99,16 @@ window.onTelemetryUpdate = function(data: TelemetryData): void {
 
   updateCount++;
   
-  // Calibrate lat G max
-  const currentLatG = Math.abs(data.accG.x);
-  if (currentLatG > state.maxObservedLatG && currentLatG < 2.0) {
-    state.maxObservedLatG = currentLatG;
-  }
+  // Read dynamic G limits calibrated from Lua (which has low-pass filters)
+  state.maxObservedLatG = data.maxObservedLatG || 1.4;
+  state.maxObservedDecelG = data.maxObservedDecelG || 1.0;
 
-  // Calibrate deceleration G max
-  const currentDecelG = -data.accG.z;
-  if (currentDecelG > state.maxObservedDecelG && currentDecelG < 1.6 && data.brake > 0.8) {
-    state.maxObservedDecelG = currentDecelG;
-  }
+  // Sync configurations from Lua telemetry
+  state.voiceEnabled = data.voiceEnabled ?? false;
+  state.drawEntryApexExit = data.drawEntryApexExit ?? true;
+  state.showSpeedHolograms = data.showSpeedHolograms ?? true;
 
-  // Calibrate acceleration G max
+  // Calibrate acceleration G max (kept local as it's not physical grip capacity)
   const currentAccelG = data.accG.z;
   if (currentAccelG > state.maxObservedAccelG && currentAccelG < 1.0 && data.throttle > 0.8) {
     state.maxObservedAccelG = currentAccelG;
@@ -320,7 +317,12 @@ function startMockSimulation(): void {
       nextTurnDist: nextTurnDist,
       nextTurnAngle: nextTurnAngle,
       roadGrip: 1.0,
-      trackPosLat: trackPosLat
+      trackPosLat: trackPosLat,
+      maxObservedLatG: 1.4,
+      maxObservedDecelG: 1.0,
+      voiceEnabled: true,
+      drawEntryApexExit: true,
+      showSpeedHolograms: true
     };
 
     window.onTelemetryUpdate(mockData);

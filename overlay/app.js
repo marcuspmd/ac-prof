@@ -16,7 +16,11 @@
     hasAnnouncedCurrentTurn: false,
     hasAnnouncedBrakingPoint: false,
     lastNextTurnDist: -1,
-    lastNextTurnAngle: 0
+    lastNextTurnAngle: 0,
+    // Configuration settings synced from Lua
+    voiceEnabled: false,
+    drawEntryApexExit: true,
+    showSpeedHolograms: true
   };
 
   // overlay/config.ts
@@ -25,7 +29,6 @@
   var SLIP_ANGLE_PEAK = 7;
   var G_SCALE = 35;
   var FEEDBACK_COOLDOWN = 8e3;
-  var AUDIO_ENABLED = false;
 
   // overlay/gg-diagram.ts
   var ggHistory = [];
@@ -237,14 +240,14 @@
   function speakFeedback(message, type, speak = true) {
     if (!coachPanel || !coachMessage) return false;
     const now = Date.now();
-    if (speak && AUDIO_ENABLED && now - state.lastFeedbackTime < FEEDBACK_COOLDOWN) return false;
+    if (speak && state.voiceEnabled && now - state.lastFeedbackTime < FEEDBACK_COOLDOWN) return false;
     coachPanel.className = "";
     if (type === "warning") coachPanel.classList.add("coach-warning");
     else if (type === "danger") coachPanel.classList.add("coach-danger");
     else if (type === "success") coachPanel.classList.add("coach-success");
     else coachPanel.className = "coach-neutral";
     coachMessage.innerText = message;
-    if (speak && AUDIO_ENABLED && "speechSynthesis" in window) {
+    if (speak && state.voiceEnabled && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(message);
       utterance.lang = "pt-BR";
@@ -401,40 +404,56 @@
       if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-safe";
       nextTurnAction.innerText = "ACELERE!";
       if (colorsPanel) colorsPanel.className = "state-safe";
-    } else if (dist > totalBrakingDistanceNeeded + 25) {
+    } else if (speed <= vTarget) {
       nextTurnDisplay.className = "panel-glass next-turn-safe";
       if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-safe";
       nextTurnAction.innerText = "VELOCIDADE OK";
       if (colorsPanel) colorsPanel.className = "state-safe";
-    } else if (dist > totalBrakingDistanceNeeded) {
-      nextTurnDisplay.className = "panel-glass next-turn-warning";
-      if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-warning";
-      nextTurnAction.innerText = "PREPARE-SE";
-      if (colorsPanel) colorsPanel.className = "state-warning";
     } else {
-      if (frontLocked) {
-        nextTurnDisplay.className = "panel-glass next-turn-danger";
-        if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-danger";
-        nextTurnAction.innerText = "TRAVANDO FRENTE!";
-        if (colorsPanel) colorsPanel.className = "state-danger";
-      } else if (rearLocked) {
-        nextTurnDisplay.className = "panel-glass next-turn-danger";
-        if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-danger";
-        nextTurnAction.innerText = "TRAVANDO TRASEIRA!";
-        if (colorsPanel) colorsPanel.className = "state-danger";
-      } else if (isBrakingSufficiently) {
-        nextTurnDisplay.className = "panel-glass next-turn-braking";
-        if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-braking";
-        nextTurnAction.innerText = "FRENAGEM OK";
-        if (colorsPanel) colorsPanel.className = "state-braking";
+      if (dist <= totalBrakingDistanceNeeded + 12) {
+        if (frontLocked) {
+          nextTurnDisplay.className = "panel-glass next-turn-danger";
+          if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-danger";
+          nextTurnAction.innerText = "TRAVANDO FRENTE!";
+          if (colorsPanel) colorsPanel.className = "state-danger";
+        } else if (rearLocked) {
+          nextTurnDisplay.className = "panel-glass next-turn-danger";
+          if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-danger";
+          nextTurnAction.innerText = "TRAVANDO TRASEIRA!";
+          if (colorsPanel) colorsPanel.className = "state-danger";
+        } else if (isBrakingSufficiently) {
+          nextTurnDisplay.className = "panel-glass next-turn-braking";
+          if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-braking";
+          nextTurnAction.innerText = "FRENAGEM OK";
+          if (colorsPanel) colorsPanel.className = "state-braking";
+        } else {
+          nextTurnDisplay.className = "panel-glass next-turn-danger";
+          if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-danger";
+          nextTurnAction.innerText = "FREIE AGORA!";
+          if (colorsPanel) colorsPanel.className = "state-danger";
+          if (!state.hasAnnouncedBrakingPoint) {
+            if (speakFeedback("Freie!", "danger")) {
+              state.hasAnnouncedBrakingPoint = true;
+            }
+          }
+        }
       } else {
-        nextTurnDisplay.className = "panel-glass next-turn-danger";
-        if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-danger";
-        nextTurnAction.innerText = "FREIE AGORA!";
-        if (colorsPanel) colorsPanel.className = "state-danger";
-        if (!state.hasAnnouncedBrakingPoint) {
-          if (speakFeedback("Freie!", "danger")) {
-            state.hasAnnouncedBrakingPoint = true;
+        if (dist < 70) {
+          nextTurnDisplay.className = "panel-glass next-turn-warning";
+          if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-warning";
+          nextTurnAction.innerText = "PREPARE-SE";
+          if (colorsPanel) colorsPanel.className = "state-warning";
+        } else {
+          if (dist > totalBrakingDistanceNeeded + 25) {
+            nextTurnDisplay.className = "panel-glass next-turn-safe";
+            if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-safe";
+            nextTurnAction.innerText = "VELOCIDADE OK";
+            if (colorsPanel) colorsPanel.className = "state-safe";
+          } else {
+            nextTurnDisplay.className = "panel-glass next-turn-warning";
+            if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-warning";
+            nextTurnAction.innerText = "PREPARE-SE";
+            if (colorsPanel) colorsPanel.className = "state-warning";
           }
         }
       }
@@ -616,14 +635,11 @@
       initDOM();
     }
     updateCount++;
-    const currentLatG = Math.abs(data.accG.x);
-    if (currentLatG > state.maxObservedLatG && currentLatG < 2) {
-      state.maxObservedLatG = currentLatG;
-    }
-    const currentDecelG = -data.accG.z;
-    if (currentDecelG > state.maxObservedDecelG && currentDecelG < 1.6 && data.brake > 0.8) {
-      state.maxObservedDecelG = currentDecelG;
-    }
+    state.maxObservedLatG = data.maxObservedLatG || 1.4;
+    state.maxObservedDecelG = data.maxObservedDecelG || 1;
+    state.voiceEnabled = data.voiceEnabled ?? false;
+    state.drawEntryApexExit = data.drawEntryApexExit ?? true;
+    state.showSpeedHolograms = data.showSpeedHolograms ?? true;
     const currentAccelG = data.accG.z;
     if (currentAccelG > state.maxObservedAccelG && currentAccelG < 1 && data.throttle > 0.8) {
       state.maxObservedAccelG = currentAccelG;
@@ -793,7 +809,12 @@
         nextTurnDist,
         nextTurnAngle,
         roadGrip: 1,
-        trackPosLat
+        trackPosLat,
+        maxObservedLatG: 1.4,
+        maxObservedDecelG: 1,
+        voiceEnabled: true,
+        drawEntryApexExit: true,
+        showSpeedHolograms: true
       };
       window.onTelemetryUpdate(mockData);
     }, 16.7);

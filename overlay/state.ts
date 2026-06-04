@@ -27,4 +27,10 @@ export const state = {
   hasAnnouncedBrakingPoint: false,
   lastNextTurnDist: -1,
   lastNextTurnAngle: 0,
+
+  // Configuration settings synced from Lua
+  voiceEnabled: false,
+  drawEntryApexExit: true,
+  showSpeedHolograms: true,
 };
+

@@ -6,21 +6,37 @@ M.maxObservedLatG = 1.4
 M.maxObservedDecelG = 1.0
 M.maxObservedAccelG = 0.5
 
--- Automatically calibrate session G limits based on vehicle behavior
+-- Smooth values for calibration (starts at baseline to prevent initial catch-up delay)
+M.smoothedLatG = 1.0
+M.smoothedDecelG = 0.8
+M.smoothedAccelG = 0.3
+
+-- Automatically calibrate session G limits based on vehicle behavior with spike filtering
 function M.updateGLimits(car)
   local accX = math.abs(car.acceleration.x)
-  if accX > M.maxObservedLatG and accX < 2.0 then
-    M.maxObservedLatG = accX
+  M.smoothedLatG = M.smoothedLatG + (accX - M.smoothedLatG) * 0.1
+  if M.smoothedLatG > M.maxObservedLatG and M.smoothedLatG < 1.8 then
+    M.maxObservedLatG = M.smoothedLatG
   end
 
   local decelG = -car.acceleration.z
-  if decelG > M.maxObservedDecelG and decelG < 1.8 and car.brake > 0.5 then
-    M.maxObservedDecelG = decelG
+  if car.brake > 0.5 then
+    M.smoothedDecelG = M.smoothedDecelG + (decelG - M.smoothedDecelG) * 0.1
+    if M.smoothedDecelG > M.maxObservedDecelG and M.smoothedDecelG < 1.6 then
+      M.maxObservedDecelG = M.smoothedDecelG
+    end
+  else
+    M.smoothedDecelG = M.smoothedDecelG + (0 - M.smoothedDecelG) * 0.1
   end
 
   local accelG = car.acceleration.z
-  if accelG > M.maxObservedAccelG and accelG < 1.0 and car.gas > 0.8 then
-    M.maxObservedAccelG = accelG
+  if car.gas > 0.8 then
+    M.smoothedAccelG = M.smoothedAccelG + (accelG - M.smoothedAccelG) * 0.1
+    if M.smoothedAccelG > M.maxObservedAccelG and M.smoothedAccelG < 0.9 then
+      M.maxObservedAccelG = M.smoothedAccelG
+    end
+  else
+    M.smoothedAccelG = M.smoothedAccelG + (0 - M.smoothedAccelG) * 0.1
   end
 end
 

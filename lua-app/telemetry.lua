@@ -1,4 +1,7 @@
+local physics = require('physics-calc')
+local config = require('config')
 local M = {}
+
 
 -- Captura a telemetria física completa do carro do jogador usando a API do CSP
 function M.getTelemetry(carIndex)
@@ -59,8 +62,14 @@ function M.getTelemetry(carIndex)
     nextTurnDist = nextTurnDist,
     nextTurnAngle = nextTurnAngle,
     roadGrip = roadGrip,
-    trackPosLat = trackPosLat
+    trackPosLat = trackPosLat,
+    maxObservedLatG = physics.maxObservedLatG or 1.4,
+    maxObservedDecelG = physics.maxObservedDecelG or 1.0,
+    voiceEnabled = config.voiceEnabled,
+    drawEntryApexExit = config.drawEntryApexExit,
+    showSpeedHolograms = config.showSpeedHolograms
   }
 end
+
 
 return M
