@@ -31,7 +31,7 @@ function M.getTelemetry(carIndex)
   local upcomingTurn = ac.getTrackUpcomingTurn(carIndex or 0)
   local nextTurnDist = -1
   local nextTurnAngle = 0
-  if upcomingTurn and math.abs(upcomingTurn.y) >= 12 then
+  if upcomingTurn and math.abs(upcomingTurn.y) >= 15 then
     nextTurnDist = upcomingTurn.x
     nextTurnAngle = upcomingTurn.y
   end
@@ -41,6 +41,14 @@ function M.getTelemetry(carIndex)
 
   local trackPos = ac.worldCoordinateToTrack(carState.position)
   local trackPosLat = trackPos and trackPos.x or 0
+
+  local vTargetKmh = 0
+  local totalBrakingDistanceNeeded = 0
+  if nextTurnDist > 0 then
+    local _, _, vTarget, brakingDist = physics.calculateTurnPhysics(carState, upcomingTurn, roadGrip)
+    vTargetKmh = vTarget * 3.6
+    totalBrakingDistanceNeeded = brakingDist
+  end
 
   return {
     speedMs = carState.speedMs or 0,
@@ -67,7 +75,9 @@ function M.getTelemetry(carIndex)
     maxObservedDecelG = physics.maxObservedDecelG or 1.0,
     voiceEnabled = config.voiceEnabled,
     drawEntryApexExit = config.drawEntryApexExit,
-    overlayOpacity = config.overlayOpacity
+    overlayOpacity = config.overlayOpacity,
+    vTargetKmh = vTargetKmh,
+    totalBrakingDistanceNeeded = totalBrakingDistanceNeeded
   }
 end
 

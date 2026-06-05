@@ -33,5 +33,7 @@ interface TelemetryData {
   voiceEnabled?: boolean;
   drawEntryApexExit?: boolean;
   overlayOpacity?: number;
+  vTargetKmh?: number;
+  totalBrakingDistanceNeeded?: number;
 }
 

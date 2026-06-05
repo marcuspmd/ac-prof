@@ -618,6 +618,24 @@ function M.update(dt)
           car.wheels[2] and round(car.wheels[2].surfaceGrip * 100) / 100 or 0,
           car.wheels[3] and round(car.wheels[3].surfaceGrip * 100) / 100 or 0
         },
+        tDirt = {
+          car.wheels[0] and round(car.wheels[0].tyreDirty * 100) / 100 or 0,
+          car.wheels[1] and round(car.wheels[1].tyreDirty * 100) / 100 or 0,
+          car.wheels[2] and round(car.wheels[2].tyreDirty * 100) / 100 or 0,
+          car.wheels[3] and round(car.wheels[3].tyreDirty * 100) / 100 or 0
+        },
+        tPres = {
+          car.wheels[0] and round(car.wheels[0].tyrePressure * 10) / 10 or 0,
+          car.wheels[1] and round(car.wheels[1].tyrePressure * 10) / 10 or 0,
+          car.wheels[2] and round(car.wheels[2].tyrePressure * 10) / 10 or 0,
+          car.wheels[3] and round(car.wheels[3].tyrePressure * 10) / 10 or 0
+        },
+        tBrake = {
+          car.wheels[0] and round(car.wheels[0].brakeTemperature) or 0,
+          car.wheels[1] and round(car.wheels[1].brakeTemperature) or 0,
+          car.wheels[2] and round(car.wheels[2].brakeTemperature) or 0,
+          car.wheels[3] and round(car.wheels[3].brakeTemperature) or 0
+        },
         rTemp = trackTemp,
         aTemp = ambTemp
       }

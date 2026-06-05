@@ -361,17 +361,7 @@
     nextTurnArrow.innerText = isRight ? "\u27A1\uFE0F" : "\u2B05\uFE0F";
     const speed = data.speedMs;
     const absAngle = Math.abs(angle);
-    let baseTargetKmh = 3500 / (absAngle + 15) + 45;
-    baseTargetKmh = Math.max(50, Math.min(290, baseTargetKmh));
-    const gripFactor = Math.sqrt(Math.max(0.1, data.roadGrip));
-    const carPerformanceFactor = Math.min(1.25, Math.sqrt(state.maxObservedLatG / 1.4));
-    let vTargetKmh = baseTargetKmh * gripFactor * carPerformanceFactor;
-    const pLat = data.trackPosLat;
-    const wrongSideFactor = isRight ? pLat : -pLat;
-    if (dist < 60 && wrongSideFactor > 0) {
-      const proximityScale = (60 - dist) / 60;
-      vTargetKmh = vTargetKmh * (1 - 0.2 * wrongSideFactor * proximityScale);
-    }
+    const vTargetKmh = data.vTargetKmh || 0;
     const vTarget = vTargetKmh / 3.6;
     const actualKmh = data.speedKmh;
     let speedClass = "speed-safe";
@@ -381,14 +371,7 @@
       speedClass = "speed-warning";
     }
     nextTurnTargetSpeed.innerHTML = `<span class="${speedClass}">${Math.round(actualKmh)}</span> <span style="color: #6b7280; font-weight: normal;">/</span> <span style="color: #3b82f6;">${Math.round(vTargetKmh)}</span> <span style="font-size: 10px; color: #6b7280; margin-left: 2px;">km/h</span>`;
-    const targetDecelMs2 = state.maxObservedDecelG * 9.81 * 0.8 * Math.max(0.5, data.roadGrip);
-    const reactionTime = 0.3;
-    const reactionDistance = speed * reactionTime;
-    let physicalBrakingDistance = 0;
-    if (speed > vTarget) {
-      physicalBrakingDistance = (speed * speed - vTarget * vTarget) / (2 * targetDecelMs2);
-    }
-    const totalBrakingDistanceNeeded = physicalBrakingDistance + reactionDistance;
+    const totalBrakingDistanceNeeded = data.totalBrakingDistanceNeeded || 0;
     let aReq = 0;
     if (speed > vTarget) {
       aReq = (speed * speed - vTarget * vTarget) / (2 * Math.max(1, dist));
@@ -616,23 +599,7 @@
     if (speedWidgetActual || speedWidgetTarget) {
       const actualKmh = data.speedKmh;
       const dist = data.nextTurnDist;
-      const angle = data.nextTurnAngle;
-      let vTargetKmh = 0;
-      if (dist > 0) {
-        const absAngle = Math.abs(angle);
-        let baseTargetKmh = 3500 / (absAngle + 15) + 45;
-        baseTargetKmh = Math.max(50, Math.min(290, baseTargetKmh));
-        const gripFactor = Math.sqrt(Math.max(0.1, data.roadGrip));
-        const carPerformanceFactor = Math.min(1.25, Math.sqrt(state.maxObservedLatG / 1.4));
-        vTargetKmh = baseTargetKmh * gripFactor * carPerformanceFactor;
-        const pLat = data.trackPosLat;
-        const isRight = angle > 0;
-        const wrongSideFactor = isRight ? pLat : -pLat;
-        if (dist < 60 && wrongSideFactor > 0) {
-          const proximityScale = (60 - dist) / 60;
-          vTargetKmh = vTargetKmh * (1 - 0.2 * wrongSideFactor * proximityScale);
-        }
-      }
+      const vTargetKmh = data.vTargetKmh || 0;
       if (speedWidgetActual) {
         speedWidgetActual.innerText = Math.round(actualKmh).toString();
         if (dist > 0) {

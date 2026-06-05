@@ -179,29 +179,8 @@ window.onTelemetryUpdate = function(data: TelemetryData): void {
   // Update new speed widget
   if (speedWidgetActual || speedWidgetTarget) {
     const actualKmh = data.speedKmh;
-    
-    // Calculate target speed using new formula
     const dist = data.nextTurnDist;
-    const angle = data.nextTurnAngle;
-    let vTargetKmh = 0;
-    
-    if (dist > 0) {
-      const absAngle = Math.abs(angle);
-      let baseTargetKmh = 3500 / (absAngle + 15) + 45;
-      baseTargetKmh = Math.max(50, Math.min(290, baseTargetKmh));
-      const gripFactor = Math.sqrt(Math.max(0.1, data.roadGrip));
-      const carPerformanceFactor = Math.min(1.25, Math.sqrt(state.maxObservedLatG / 1.4));
-      vTargetKmh = baseTargetKmh * gripFactor * carPerformanceFactor;
-      
-      // Track positioning penalty
-      const pLat = data.trackPosLat;
-      const isRight = angle > 0;
-      const wrongSideFactor = isRight ? pLat : -pLat;
-      if (dist < 60 && wrongSideFactor > 0) {
-        const proximityScale = (60 - dist) / 60;
-        vTargetKmh = vTargetKmh * (1.0 - 0.2 * wrongSideFactor * proximityScale);
-      }
-    }
+    const vTargetKmh = data.vTargetKmh || 0;
 
     if (speedWidgetActual) {
       speedWidgetActual.innerText = Math.round(actualKmh).toString();

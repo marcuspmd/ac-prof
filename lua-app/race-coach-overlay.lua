@@ -87,10 +87,10 @@ function windowSettings(dt)
   
   ui.offsetCursorY(6)
   
-  if ui.checkbox("Desenhar Entrada, Ápice e Saída", config.drawEntryApexExit) then
+  if ui.checkbox("Desenhar Círculo do Ápice", config.drawEntryApexExit) then
     config.drawEntryApexExit = not config.drawEntryApexExit
   end
-  ui.textColored("Mostra marcações nos pontos cruciais da curva (Entrada, Ápice, Saída).", rgbm(0.6, 0.6, 0.6, 1.0))
+  ui.textColored("Mostra a marcação circular em 3D no ápice de cada curva.", rgbm(0.6, 0.6, 0.6, 1.0))
   
   ui.offsetCursorY(6)
   
@@ -138,7 +138,7 @@ ui.addSettings({
     config.showRacingLine = not config.showRacingLine
   end
   ui.offsetCursorY(4)
-  if ui.checkbox("Marcar Entrada, Ápice e Saída", config.drawEntryApexExit) then
+  if ui.checkbox("Marcar Ponto de Ápice", config.drawEntryApexExit) then
     config.drawEntryApexExit = not config.drawEntryApexExit
   end
   ui.offsetCursorY(4)
@@ -175,7 +175,7 @@ function script.update(dt)
   local sim = ac.getSim()
   local roadGrip = sim and sim.roadGrip or 1.0
   local upcomingTurn = ac.getTrackUpcomingTurn(0)
-  if upcomingTurn and math.abs(upcomingTurn.y) < 12 then
+  if upcomingTurn and math.abs(upcomingTurn.y) < 15 then
     upcomingTurn = nil
   end
 

@@ -54,7 +54,7 @@ local function scanTrackCorners(car, sim)
 
   local stepM = 5.0 -- sample every 5 meters
   local step = stepM / trackLength
-  local lookAheadSteps = 80 -- scan 400 meters ahead
+  local lookAheadSteps = 160 -- scan 800 meters ahead
 
   local curCandidate = nil
   
@@ -107,7 +107,7 @@ local function scanTrackCorners(car, sim)
       end
     else
       if curCandidate then
-        if math.abs(curCandidate.sumAngle) >= 12.0 then
+        if math.abs(curCandidate.sumAngle) >= 15.0 then
           table.insert(detected, curCandidate)
         end
         curCandidate = nil
@@ -115,34 +115,11 @@ local function scanTrackCorners(car, sim)
     end
   end
   
-  if curCandidate and math.abs(curCandidate.sumAngle) >= 12.0 then
+  if curCandidate and math.abs(curCandidate.sumAngle) >= 15.0 then
     table.insert(detected, curCandidate)
   end
   
   return detected
-end
-
--- Helper to calculate target speed for a specific turn angle
-local function calculateTargetSpeedForAngle(angle, roadGrip, speedMs, maxObservedLatG, maxObservedDecelG)
-  local absAngle = math.abs(angle)
-  local baseTargetKmh = 3500 / (absAngle + 15) + 45
-  baseTargetKmh = math.max(50, math.min(290, baseTargetKmh))
-
-  local gripFactor = math.sqrt(math.max(0.1, roadGrip))
-  local carPerformanceFactor = math.min(1.25, math.sqrt(maxObservedLatG / 1.4))
-  local vTargetKmh = baseTargetKmh * gripFactor * carPerformanceFactor * config.cornerSpeedBias
-  local vTarget = vTargetKmh / 3.6
-
-  local targetDecel = maxObservedDecelG * 9.81 * 0.80 * math.max(0.5, roadGrip)
-  local reactionDistance = speedMs * 0.3
-
-  local physicalBrakingDistance = 0
-  if speedMs > vTarget then
-    physicalBrakingDistance = (speedMs * speedMs - vTarget * vTarget) / (2 * targetDecel)
-  end
-  local totalBrakingDistanceNeeded = (physicalBrakingDistance + reactionDistance) * config.brakingMargin
-  
-  return vTarget, totalBrakingDistanceNeeded
 end
 
 -- Render the 3D racing line and optimized braking point indicators on the track surface
@@ -155,13 +132,13 @@ function M.drawRacingLine(car, sim, nextTurnDist, nextTurnAngle, vTarget, totalB
 
   -- 2. Scan track ahead for all corners in look-ahead distance
   local scannedCorners = scanTrackCorners(car, sim)
-  
+
   for _, c in ipairs(scannedCorners) do
     local apexProgress = car.splinePosition + c.apexStepIdx * (5.0 / trackLength)
     if apexProgress > 1.0 then apexProgress = apexProgress - 1.0 end
     
-    local vTargetLocal, totalBrakingLocal = calculateTargetSpeedForAngle(
-      c.sumAngle, roadGrip, car.speedMs, physics.maxObservedLatG, physics.maxObservedDecelG
+    local vTargetLocal, totalBrakingLocal = physics.calculateTurnPhysicsForAngle(
+      car, c.sumAngle, roadGrip, car.speedMs
     )
 
     -- Check if this turn is already in our activeTurns cache list
@@ -191,7 +168,7 @@ function M.drawRacingLine(car, sim, nextTurnDist, nextTurnAngle, vTarget, totalB
   end
 
   -- 3. Also add/update native upcoming turn if valid
-  if nextTurnDist > 0 and math.abs(nextTurnAngle) >= 12 then
+  if nextTurnDist > 0 and math.abs(nextTurnAngle) >= 15 then
     local nativeApexProgress = car.splinePosition + nextTurnDist / trackLength
     if nativeApexProgress > 1.0 then nativeApexProgress = nativeApexProgress - 1.0 end
 
@@ -357,37 +334,28 @@ function M.drawRacingLine(car, sim, nextTurnDist, nextTurnAngle, vTarget, totalB
     end
   end
 
-  -- Helper functions for 3D track markings
-  local function drawTrackCrossLine(p, color, thickness)
-    local widths = ac.getTrackAISplineSides(p)
-    local pos = ac.trackProgressToWorldCoordinate(p, true)
-    local dp = 0.0001
-    local posNext = ac.trackProgressToWorldCoordinate(p + dp, true)
-    local tangent = posNext - pos
-    tangent.y = 0
-    local perpendicular = vec3(-tangent.z, 0, tangent.x):normalize()
-    local leftPos = pos + perpendicular * widths.x
-    local rightPos = pos - perpendicular * widths.y
-    
-    trackPainter:line(leftPos, rightPos, color, thickness)
-  end
-
-  -- 7. Draw Entry, Apex, Exit markings for all active cache turns
+  -- 7. Draw Apex marking for the closest upcoming turn only
   if config.drawEntryApexExit then
+    local closestTurn = nil
+    local minUpcomingDist = 9999
+
     for _, turn in ipairs(activeTurns) do
-      -- Calculate distance to this turn's apex with wrap-around
       local diff = turn.apexProgress - car.splinePosition
       if diff > 0.5 then diff = diff - 1.0
       elseif diff < -0.5 then diff = diff + 1.0 end
       local distToApex = diff * trackLength
 
-      local apexWorldPos = ac.trackProgressToWorldCoordinate(turn.apexProgress, true)
-      local entryDist = math.max(30, turn.totalBrakingDistanceNeeded)
-      local entryProgress = turn.apexProgress - entryDist / trackLength
-      if entryProgress < 0.0 then entryProgress = entryProgress + 1.0 end
+      -- Draw markings for the turn we are approaching or currently in (up to 15m past apex)
+      if distToApex > -15 and distToApex < minUpcomingDist and distToApex < 400 then
+        minUpcomingDist = distToApex
+        closestTurn = turn
+      end
+    end
 
-      -- Entry point (Red line)
-      drawTrackCrossLine(entryProgress, rgbm(1.0, 0.2, 0.2, 0.8), 0.4)
+    if closestTurn then
+      local turn = closestTurn
+      local distToApex = minUpcomingDist
+      local apexWorldPos = ac.trackProgressToWorldCoordinate(turn.apexProgress, true)
 
       -- Apex point (Gold circle)
       local apexColor = rgbm(1, 0.8, 0, 0.8) -- Gold/Yellow
@@ -395,11 +363,6 @@ function M.drawRacingLine(car, sim, nextTurnDist, nextTurnAngle, vTarget, totalB
         apexColor = rgbm(0, 0.9, 0.2, 0.8) -- Light Green when passing the apex
       end
       trackPainter:circle(apexWorldPos, 1.2, false, apexColor)
-
-      -- Exit point (Green line)
-      local exitProgress = turn.apexProgress + 30 / trackLength
-      if exitProgress > 1.0 then exitProgress = exitProgress - 1.0 end
-      drawTrackCrossLine(exitProgress, rgbm(0.2, 1.0, 0.2, 0.8), 0.4)
     end
   end
 end
