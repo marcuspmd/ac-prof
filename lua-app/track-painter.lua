@@ -306,18 +306,40 @@ function M.drawRacingLine(car, sim, nextTurnDist, nextTurnAngle, vTarget, totalB
           local p = (idx - 1) / detailCount
           local inDynamicBraking, targetSpeedAtPt = checkDynamicBraking(p, activeCorners, trackLength)
           
+          -- Smooth gas and brake inputs over a 7-point window to filter out recording noise
+          local sumGas = 0
+          local sumBrake = 0
+          local count = 0
+          for w = -3, 3 do
+            local wIdx = ((idx + w - 1) % detailCount) + 1
+            local wPt = aiLoader.points[wIdx]
+            if wPt then
+              sumGas = sumGas + wPt.gas
+              sumBrake = sumBrake + wPt.brake
+              count = count + 1
+            end
+          end
+          local smoothGas = count > 0 and (sumGas / count) or pt.gas
+          local smoothBrake = count > 0 and (sumBrake / count) or pt.brake
+          
           -- Speed-relative color compared directly with the scaled AI speed profile
-          local targetSpeedKmh = 0
+          local targetSpeedKmh = pt.speedKmh * speedMult * config.cornerSpeedBias * gripSpeedScale
           local inAnyBrakingZone = false
           local inAnyAccelerationZone = false
+          local inAnyCoastingZone = false
           
           if inDynamicBraking then
-            targetSpeedKmh = targetSpeedAtPt * 3.6
             inAnyBrakingZone = true
           else
-            targetSpeedKmh = pt.speedKmh * speedMult * config.cornerSpeedBias * gripSpeedScale
-            inAnyBrakingZone = (pt.brake > 0.01)
-            inAnyAccelerationZone = (pt.gas > 0.05 and pt.brake <= 0.01)
+            inAnyBrakingZone = (smoothBrake > 0.01)
+          end
+          
+          if inAnyBrakingZone then
+            -- Braking
+          elseif smoothGas > 0.05 and carSpeedKmh < targetSpeedKmh + 2 then
+            inAnyAccelerationZone = true
+          else
+            inAnyCoastingZone = true
           end
           
           local deltaKmh = carSpeedKmh - targetSpeedKmh
@@ -345,11 +367,12 @@ function M.drawRacingLine(car, sim, nextTurnDist, nextTurnAngle, vTarget, totalB
               prevBrakingPos = nil
             end
             
-            -- Draw acceleration zone (Green line offset to the Right side)
-            if inAnyAccelerationZone then
+            -- Draw acceleration / coasting zone (Green / Light Blue line offset to the Right side)
+            if inAnyAccelerationZone or inAnyCoastingZone then
+              local sideColor = inAnyAccelerationZone and rgbm(0, 1, 0, 0.75) or rgbm(0.1, 0.7, 1.0, 0.75)
               local accelerationWorldPos = pt.worldPos - pt.perp * 0.6
               if prevAccelPos then
-                accelerationPainter:line(prevAccelPos, accelerationWorldPos, rgbm(0, 1, 0, 0.75), 0.15)
+                accelerationPainter:line(prevAccelPos, accelerationWorldPos, sideColor, 0.15)
               end
               prevAccelPos = accelerationWorldPos
             else
@@ -401,18 +424,40 @@ function M.drawRacingLine(car, sim, nextTurnDist, nextTurnAngle, vTarget, totalB
 
           local inDynamicBraking, targetSpeedAtPt = checkDynamicBraking(pt.p, activeCorners, trackLength)
           
+          -- Smooth gas and brake inputs over a 5-point window to filter out recording noise
+          local sumGas = 0
+          local sumBrake = 0
+          local count = 0
+          for w = -2, 2 do
+            local wIdx = i + w
+            if wIdx >= 1 and wIdx <= numPoints then
+              local wPt = points[wIdx]
+              sumGas = sumGas + wPt.aiGas
+              sumBrake = sumBrake + wPt.aiBrake
+              count = count + 1
+            end
+          end
+          local smoothGas = count > 0 and (sumGas / count) or pt.aiGas
+          local smoothBrake = count > 0 and (sumBrake / count) or pt.aiBrake
+          
           -- Speed-relative color compared directly with the scaled AI speed profile
-          local targetSpeedKmh = 0
+          local targetSpeedKmh = pt.aiSpeedKmh * speedMult * config.cornerSpeedBias * gripSpeedScale
           local inAnyBrakingZone = false
           local inAnyAccelerationZone = false
+          local inAnyCoastingZone = false
           
           if inDynamicBraking then
-            targetSpeedKmh = targetSpeedAtPt * 3.6
             inAnyBrakingZone = true
           else
-            targetSpeedKmh = pt.aiSpeedKmh * speedMult * config.cornerSpeedBias * gripSpeedScale
-            inAnyBrakingZone = (pt.aiBrake > 0.01)
-            inAnyAccelerationZone = (pt.aiGas > 0.05 and pt.aiBrake <= 0.01)
+            inAnyBrakingZone = (smoothBrake > 0.01)
+          end
+          
+          if inAnyBrakingZone then
+            -- Braking
+          elseif smoothGas > 0.05 and carSpeedKmh < targetSpeedKmh + 2 then
+            inAnyAccelerationZone = true
+          else
+            inAnyCoastingZone = true
           end
 
           local deltaKmh = carSpeedKmh - targetSpeedKmh
@@ -430,7 +475,7 @@ function M.drawRacingLine(car, sim, nextTurnDist, nextTurnAngle, vTarget, totalB
 
           -- Calculate perpendicular offset vector for dual-side lines
           local perpendicular = nil
-          if inAnyBrakingZone or inAnyAccelerationZone then
+          if inAnyBrakingZone or inAnyAccelerationZone or inAnyCoastingZone then
             local tangent = worldPos - prevPt.worldPos
             tangent.y = 0
             local tangentLen = tangent:length()
@@ -450,11 +495,12 @@ function M.drawRacingLine(car, sim, nextTurnDist, nextTurnAngle, vTarget, totalB
             prevBrakingPos = nil
           end
 
-          -- Draw acceleration zone (Green line offset to the Right side)
-          if inAnyAccelerationZone and perpendicular then
+          -- Draw acceleration / coasting zone (Green / Light Blue line offset to the Right side)
+          if (inAnyAccelerationZone or inAnyCoastingZone) and perpendicular then
+            local sideColor = inAnyAccelerationZone and rgbm(0, 1, 0, 0.75) or rgbm(0.1, 0.7, 1.0, 0.75)
             local accelerationWorldPos = worldPos - perpendicular * 0.6
             if prevAccelPos then
-              accelerationPainter:line(prevAccelPos, accelerationWorldPos, rgbm(0, 1, 0, 0.75), 0.15)
+              accelerationPainter:line(prevAccelPos, accelerationWorldPos, sideColor, 0.15)
             end
             prevAccelPos = accelerationWorldPos
           else
