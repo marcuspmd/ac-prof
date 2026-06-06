@@ -76,135 +76,69 @@ local function checkDynamicBraking(p, activeCorners, trackLength)
 end
 
 -- Helper function to pre-scan track spline for corners on session startup
+-- Uses the AI speed profile and braking triggers to detect real apexes
 local function preScanTrackCorners(sim)
   if not sim or not sim.trackLengthM or sim.trackLengthM <= 100 then return end
   
   local trackLength = sim.trackLengthM
-  local stepM = 5.0 -- sample every 5 meters
-  local step = stepM / trackLength
-  local totalSteps = math.floor(trackLength / stepM)
   
-  -- Shift scan start backwards by 200m to capture corners crossing the start/finish line continuously
-  local wrapM = 200.0
-  local wrapSteps = math.floor(wrapM / stepM)
-
-  local curCandidate = nil
-  local lowCurvatureSteps = 0
-  local maxLowCurvatureSteps = 6 -- 30 meters low-curvature tolerance (e.g. for double-apex)
-  local rawCorners = {}
-
-  for i = -wrapSteps, totalSteps - 1 do
-    local p1 = (i * step) % 1.0
-    local pos1 = ac.trackProgressToWorldCoordinate(p1, true)
+  -- Make sure AI line is loaded
+  aiLoader.loadAiLine()
+  
+  allTrackCorners = {}
+  
+  local detailCount = aiLoader.detailCount
+  if detailCount <= 0 then return end
+  
+  -- Set search windows based on point spacing (~25m apex check, ~60m braking lookback)
+  local mPerPoint = trackLength / detailCount
+  local windowSize = math.max(5, math.floor(25 / mPerPoint)) 
+  local lookBackWindow = math.max(10, math.floor(60 / mPerPoint))
+  
+  local maxSpeedKmh = aiLoader.aiMaxSpeedKmh or 100
+  
+  for i = 1, detailCount do
+    local progress = (i - 1) / detailCount
+    local _, _, speedKmh = aiLoader.getAiInputAtProgress(progress)
     
-    local p0 = (p1 - step + 1.0) % 1.0
-    local pos0 = ac.trackProgressToWorldCoordinate(p0, true)
+    -- Check if it's a local minimum of speed (apex)
+    local isMin = true
+    for w = -windowSize, windowSize do
+      local checkP = (progress + w / detailCount) % 1.0
+      local _, _, wSpeedKmh = aiLoader.getAiInputAtProgress(checkP)
+      if wSpeedKmh < speedKmh then
+        isMin = false
+        break
+      end
+    end
     
-    local p2 = (p1 + step) % 1.0
-    local pos2 = ac.trackProgressToWorldCoordinate(p2, true)
-    
-    if pos1 and pos0 and pos2 then
-      local v1 = (pos1 - pos0)
-      v1.y = 0
-      v1:normalize()
-      
-      local v2 = (pos2 - pos1)
-      v2.y = 0
-      v2:normalize()
-      
-      local dot = v1:dot(v2)
-      dot = math.max(-1.0, math.min(1.0, dot))
-      local angleDiff = math.deg(math.acos(dot))
-      
-      -- Cross product to get turn direction
-      local crossY = v1.x * v2.z - v1.z * v2.x
-      local turnSign = crossY >= 0 and 1 or -1
-      local curvature = angleDiff * turnSign
-      
-      if math.abs(curvature) > 0.6 then
-        local directionChanged = false
-        if curCandidate then
-          local currentSign = curCandidate.sumAngle >= 0 and 1 or -1
-          local newSign = curvature >= 0 and 1 or -1
-          if newSign ~= currentSign then
-            directionChanged = true
-          end
+    if isMin then
+      -- Verify if the AI actually brakes before this point to filter out straights
+      local hasBraking = false
+      for w = -lookBackWindow, 0 do
+        local checkP = (progress + w / detailCount) % 1.0
+        local _, wBrake, _ = aiLoader.getAiInputAtProgress(checkP)
+        if wBrake > 0.01 then
+          hasBraking = true
+          break
         end
-
-        if directionChanged then
-          -- Close current candidate and start new one
-          if math.abs(curCandidate.sumAngle) >= 15.0 then
-            table.insert(rawCorners, curCandidate)
-          end
-          curCandidate = {
-            startStep = i,
-            endStep = i,
-            sumAngle = curvature,
-            maxCurvature = math.abs(curvature),
-            apexStep = i
-          }
-          lowCurvatureSteps = 0
-        elseif not curCandidate then
-          curCandidate = {
-            startStep = i,
-            endStep = i,
-            sumAngle = curvature,
-            maxCurvature = math.abs(curvature),
-            apexStep = i
-          }
-          lowCurvatureSteps = 0
-        else
-          curCandidate.endStep = i
-          curCandidate.sumAngle = curCandidate.sumAngle + curvature
-          if math.abs(curvature) > curCandidate.maxCurvature then
-            curCandidate.maxCurvature = math.abs(curvature)
-            curCandidate.apexStep = i
-          end
-          lowCurvatureSteps = 0
-        end
-      else
-        if curCandidate then
-          lowCurvatureSteps = lowCurvatureSteps + 1
-          if lowCurvatureSteps > maxLowCurvatureSteps then
-            -- Close candidate (it ends at curCandidate.endStep automatically)
-            if math.abs(curCandidate.sumAngle) >= 15.0 then
-              table.insert(rawCorners, curCandidate)
-            end
-            curCandidate = nil
-            lowCurvatureSteps = 0
-          else
-            -- Keep open through brief straight, sum curvature
-            curCandidate.sumAngle = curCandidate.sumAngle + curvature
-          end
-        end
+      end
+      
+      -- Ensure it is a significant corner (speed drops below 92% of top speed)
+      local isRealCorner = (speedKmh < maxSpeedKmh * 0.92)
+      
+      if hasBraking and isRealCorner then
+        table.insert(allTrackCorners, {
+          apexProgress = progress,
+          vTargetAI = speedKmh / 3.6
+        })
       end
     end
   end
   
-  if curCandidate and math.abs(curCandidate.sumAngle) >= 15.0 then
-    table.insert(rawCorners, curCandidate)
-  end
-
-  -- Post-process: Map steps to progress and sort corners by apex progress
-  local processed = {}
-  for _, rc in ipairs(rawCorners) do
-    local apexProgress = (rc.apexStep * step) % 1.0
-    local startProgress = (rc.startStep * step) % 1.0
-    local endProgress = (rc.endStep * step) % 1.0
-    
-    table.insert(processed, {
-      apexProgress = apexProgress,
-      startProgress = startProgress,
-      endProgress = endProgress,
-      sumAngle = rc.sumAngle,
-      maxCurvature = rc.maxCurvature
-    })
-  end
-
-  -- Sort corners by apex progress
-  table.sort(processed, function(a, b) return a.apexProgress < b.apexProgress end)
+  -- Sort corners by progress along the track
+  table.sort(allTrackCorners, function(a, b) return a.apexProgress < b.apexProgress end)
   
-  allTrackCorners = processed
   isTrackScanned = true
 end
 
@@ -237,7 +171,20 @@ function M.drawRacingLine(car, sim, nextTurnDist, nextTurnAngle, vTarget, totalB
       local distToApex = diff * trackLength
 
       if distToApex > -20 and distToApex < 500 then
-        local vTargetCorner, brakingDist = physics.calculateTurnPhysicsForAngle(car, turn.sumAngle, roadGrip, car.speedMs)
+        -- Calculate dynamic braking zone based on player speed and AI apex speed adjusted for grip
+        local vTargetCorner = turn.vTargetAI * gripSpeedScale * config.cornerSpeedBias
+        
+        local avgBrakingSpeedMs = (car.speedMs + vTargetCorner) / 2
+        local brakingFactors = physics.getPhysicsFactors(car, avgBrakingSpeedMs)
+        local targetDecel = physics.maxObservedDecelG * 9.81 * 0.80 * math.max(0.5, roadGrip) * brakingFactors.aeroGripMultiplier * brakingFactors.brakeEfficiency
+        
+        local reactionDistance = car.speedMs * 0.3
+        local physicalBrakingDistance = 0
+        if car.speedMs > vTargetCorner then
+          physicalBrakingDistance = (car.speedMs * car.speedMs - vTargetCorner * vTargetCorner) / (2 * targetDecel)
+        end
+        local brakingDist = (physicalBrakingDistance + reactionDistance) * config.brakingMargin
+        
         table.insert(activeCorners, {
           turn = turn,
           vTarget = vTargetCorner,

@@ -135,6 +135,54 @@ function M.loadAiLine()
     end
   end
 
+  -- Recalculate gas and brake for fallback mode (binary fast_lane.ai) to have correct physical inputs
+  local sim = ac.getSim()
+  local trackLength = sim and sim.trackLengthM or 2000
+  local ds = trackLength / detailCount
+  if ds <= 0.1 then ds = 1.5 end
+
+  local rawInputs = {}
+  for i = 1, detailCount do
+    local data = aiTelemetry[i]
+    local nextIdx = (i % detailCount) + 1
+    local dataNext = aiTelemetry[nextIdx]
+    
+    local vCurr = data.speedKmh / 3.6
+    local vNext = dataNext.speedKmh / 3.6
+    
+    local a = (vNext * vNext - vCurr * vCurr) / (2 * ds)
+    
+    local newGas = 0
+    local newBrake = 0
+    
+    if a < -1.0 then
+      newBrake = math.min(1.0, math.abs(a + 1.0) / 8.0)
+      newGas = 0.0
+    elseif a >= 0.0 then
+      newBrake = 0.0
+      newGas = 1.0
+    else
+      newBrake = 0.0
+      newGas = 0.0
+    end
+    rawInputs[i] = { gas = newGas, brake = newBrake }
+  end
+  
+  -- Smooth the inputs over a 5-point window
+  for i = 1, detailCount do
+    local sumGas = 0
+    local sumBrake = 0
+    local count = 0
+    for w = -2, 2 do
+      local idx = ((i + w - 1) % detailCount) + 1
+      sumGas = sumGas + rawInputs[idx].gas
+      sumBrake = sumBrake + rawInputs[idx].brake
+      count = count + 1
+    end
+    aiTelemetry[i].gas = sumGas / count
+    aiTelemetry[i].brake = sumBrake / count
+  end
+
   isLoaded = true
   M.aiMaxSpeedKmh = maxSpeedKmh
   log(string.format("Arquivo fast_lane.ai lido com sucesso. Pontos carregados: %d, Velocidade Maxima IA: %.1f km/h", #aiTelemetry, maxSpeedKmh))
