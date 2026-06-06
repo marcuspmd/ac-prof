@@ -60,6 +60,21 @@ local function getSpeedRelativeColor(deltaKmh)
   end
 end
 
+-- Check if progress 'p' is within the dynamic braking zone of any active corner
+local function checkDynamicBraking(p, activeCorners, trackLength)
+  for _, acCorner in ipairs(activeCorners) do
+    local diffPt = acCorner.turn.apexProgress - p
+    if diffPt > 0.5 then diffPt = diffPt - 1.0
+    elseif diffPt < -0.5 then diffPt = diffPt + 1.0 end
+    local distPtToApex = diffPt * trackLength
+
+    if distPtToApex >= 0 and distPtToApex <= acCorner.brakingDist then
+      return true, acCorner.vTarget
+    end
+  end
+  return false, nil
+end
+
 -- Helper function to pre-scan track spline for corners on session startup
 local function preScanTrackCorners(sim)
   if not sim or not sim.trackLengthM or sim.trackLengthM <= 100 then return end
@@ -208,6 +223,30 @@ function M.drawRacingLine(car, sim, nextTurnDist, nextTurnAngle, vTarget, totalB
   -- Make sure AI line is loaded
   aiLoader.loadAiLine()
 
+  -- Identify active upcoming corners and their dynamic braking zones
+  local activeCorners = {}
+  local physicsFactors = physics.getPhysicsFactors(car, car.speedMs)
+  local totalGrip = roadGrip * physicsFactors.tyreGrip * physicsFactors.aeroGripMultiplier
+  local gripSpeedScale = math.sqrt(math.max(0.1, totalGrip))
+
+  if isTrackScanned and #allTrackCorners > 0 then
+    for _, turn in ipairs(allTrackCorners) do
+      local diff = turn.apexProgress - car.splinePosition
+      if diff > 0.5 then diff = diff - 1.0
+      elseif diff < -0.5 then diff = diff + 1.0 end
+      local distToApex = diff * trackLength
+
+      if distToApex > -20 and distToApex < 500 then
+        local vTargetCorner, brakingDist = physics.calculateTurnPhysicsForAngle(car, turn.sumAngle, roadGrip, car.speedMs)
+        table.insert(activeCorners, {
+          turn = turn,
+          vTarget = vTargetCorner,
+          brakingDist = brakingDist
+        })
+      end
+    end
+  end
+
   -- 1. Reset all painters
   racingPainter:reset()
   brakingPainter:reset()
@@ -264,8 +303,23 @@ function M.drawRacingLine(car, sim, nextTurnDist, nextTurnAngle, vTarget, totalB
         local pt = aiLoader.points[idx]
         
         if pt then
+          local p = (idx - 1) / detailCount
+          local inDynamicBraking, targetSpeedAtPt = checkDynamicBraking(p, activeCorners, trackLength)
+          
           -- Speed-relative color compared directly with the scaled AI speed profile
-          local targetSpeedKmh = pt.speedKmh * speedMult * config.cornerSpeedBias
+          local targetSpeedKmh = 0
+          local inAnyBrakingZone = false
+          local inAnyAccelerationZone = false
+          
+          if inDynamicBraking then
+            targetSpeedKmh = targetSpeedAtPt * 3.6
+            inAnyBrakingZone = true
+          else
+            targetSpeedKmh = pt.speedKmh * speedMult * config.cornerSpeedBias * gripSpeedScale
+            inAnyBrakingZone = (pt.brake > 0.01)
+            inAnyAccelerationZone = (pt.gas > 0.05 and pt.brake <= 0.01)
+          end
+          
           local deltaKmh = carSpeedKmh - targetSpeedKmh
           local color = getSpeedRelativeColor(deltaKmh)
           
@@ -278,8 +332,7 @@ function M.drawRacingLine(car, sim, nextTurnDist, nextTurnAngle, vTarget, totalB
             racingPainter:line(prevPt.worldPos, pt.worldPos, color, 0.5)
             
             -- Guide lines conditions from pre-calculated gas/brake
-            local inAnyBrakingZone = (pt.brake > 0.01)
-            local inAnyAccelerationZone = (pt.gas > 0.05 and pt.brake <= 0.01)
+            -- (Using dynamic variables calculated above)
             
             -- Draw braking zone (Red line offset to the Left side)
             if inAnyBrakingZone then
@@ -346,8 +399,22 @@ function M.drawRacingLine(car, sim, nextTurnDist, nextTurnAngle, vTarget, totalB
           local pt = points[i]
           local worldPos = pt.worldPos
 
+          local inDynamicBraking, targetSpeedAtPt = checkDynamicBraking(pt.p, activeCorners, trackLength)
+          
           -- Speed-relative color compared directly with the scaled AI speed profile
-          local targetSpeedKmh = pt.aiSpeedKmh * speedMult * config.cornerSpeedBias
+          local targetSpeedKmh = 0
+          local inAnyBrakingZone = false
+          local inAnyAccelerationZone = false
+          
+          if inDynamicBraking then
+            targetSpeedKmh = targetSpeedAtPt * 3.6
+            inAnyBrakingZone = true
+          else
+            targetSpeedKmh = pt.aiSpeedKmh * speedMult * config.cornerSpeedBias * gripSpeedScale
+            inAnyBrakingZone = (pt.aiBrake > 0.01)
+            inAnyAccelerationZone = (pt.aiGas > 0.05 and pt.aiBrake <= 0.01)
+          end
+
           local deltaKmh = carSpeedKmh - targetSpeedKmh
           local color = getSpeedRelativeColor(deltaKmh)
 
@@ -359,8 +426,7 @@ function M.drawRacingLine(car, sim, nextTurnDist, nextTurnAngle, vTarget, totalB
           racingPainter:line(prevPt.worldPos, worldPos, color, 0.5)
 
           -- Guide lines conditions from AI inputs
-          local inAnyBrakingZone = (pt.aiBrake > 0.01)
-          local inAnyAccelerationZone = (pt.aiGas > 0.05 and pt.aiBrake <= 0.01)
+          -- (Using dynamic variables calculated above)
 
           -- Calculate perpendicular offset vector for dual-side lines
           local perpendicular = nil
