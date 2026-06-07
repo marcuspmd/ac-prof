@@ -183,6 +183,23 @@ function M.loadAiLine()
     aiTelemetry[i].brake = sumBrake / count
   end
 
+  -- Smooth the speed profile over a 15-point window to eliminate recording noise/jitter
+  local smoothSpeed = {}
+  local speedWindow = 7 -- 7 points ahead, 7 points behind (15 total)
+  for i = 1, detailCount do
+    local sumSpeed = 0
+    local count = 0
+    for w = -speedWindow, speedWindow do
+      local idx = ((i + w - 1) % detailCount) + 1
+      sumSpeed = sumSpeed + aiTelemetry[idx].speedKmh
+      count = count + 1
+    end
+    smoothSpeed[i] = sumSpeed / count
+  end
+  for i = 1, detailCount do
+    aiTelemetry[i].speedKmh = smoothSpeed[i]
+  end
+
   isLoaded = true
   M.aiMaxSpeedKmh = maxSpeedKmh
   log(string.format("Arquivo fast_lane.ai lido com sucesso. Pontos carregados: %d, Velocidade Maxima IA: %.1f km/h", #aiTelemetry, maxSpeedKmh))

@@ -53,6 +53,16 @@ local function sign(x)
   return x > 0 and 1 or (x < 0 and -1 or 0)
 end
 
+-- Helper to safely access object fields that might not exist in older CSP versions
+local function safeGet(obj, field, default)
+  if not obj then return default end
+  local success, val = pcall(function() return obj[field] end)
+  if success and val ~= nil then
+    return val
+  end
+  return default
+end
+
 -- Generates coordinate map of the track (centerline, left, right borders)
 local function generateTrackMap()
   local map = {
@@ -191,23 +201,53 @@ local function checkLockup(car)
 end
 
 -- Scorecard calculator for corners completed
-local function processCornerStats(samples, cornerAngle, maxObservedLatG)
+local function processCornerStats(samples, cornerAngle, maxObservedLatG, car)
   if #samples < 5 then return nil end
 
+  -- Detect if the vehicle went off-track during the corner
+  local wentOffTrack = false
+  local offTrackIndex = nil
+  for i, s in ipairs(samples) do
+    if s.offTrack then
+      wentOffTrack = true
+      offTrackIndex = offTrackIndex or i
+    end
+  end
+
+  -- We filter evaluation samples: only use samples prior to the first off-track event
+  local evalSamples = {}
+  local evalSamplesCount = wentOffTrack and (offTrackIndex - 1) or #samples
+  if evalSamplesCount >= 5 then
+    for i = 1, evalSamplesCount do
+      table.insert(evalSamples, samples[i])
+    end
+  else
+    -- If they went off-track immediately, use at least the first 5 samples to avoid scoring crash
+    for i = 1, math.min(5, #samples) do
+      table.insert(evalSamples, samples[i])
+    end
+  end
+
   local minSpeedMs = math.huge
-  for _, s in ipairs(samples) do
+  for _, s in ipairs(evalSamples) do
     if s.speedMs < minSpeedMs then
       minSpeedMs = s.speedMs
     end
   end
   local minSpeedKmh = minSpeedMs * 3.6
 
-  local absAngle = math.abs(cornerAngle)
-  local baseTargetKmh = 3500 / (absAngle + 15) + 45
-  baseTargetKmh = math.max(50, math.min(290, baseTargetKmh))
-  local gripFactor = math.sqrt(math.max(0.1, samples[1].roadGrip))
-  local carPerformanceFactor = math.min(1.25, math.sqrt(maxObservedLatG / 1.4))
-  local targetKmh = baseTargetKmh * gripFactor * carPerformanceFactor
+  local targetKmh = 0
+  if car then
+    local vTargetMs, _ = physics.calculateTurnPhysicsForAngle(car, cornerAngle, evalSamples[1].roadGrip, evalSamples[1].speedMs)
+    targetKmh = vTargetMs * 3.6
+  else
+    local absAngle = math.abs(cornerAngle)
+    local baseTargetKmh = 3500 / (absAngle + 15) + 45
+    baseTargetKmh = math.max(50, math.min(290, baseTargetKmh))
+    local gripFactor = math.sqrt(math.max(0.1, evalSamples[1].roadGrip))
+    local carPerformanceFactor = math.min(1.25, math.sqrt(maxObservedLatG / 1.4))
+    targetKmh = baseTargetKmh * gripFactor * carPerformanceFactor
+  end
 
   local speedDiff = minSpeedKmh - targetKmh
   local speedScore = 100
@@ -222,7 +262,7 @@ local function processCornerStats(samples, cornerAngle, maxObservedLatG)
   local highBrakeSteerSamples = 0
   local earlyRelease = true
 
-  for _, s in ipairs(samples) do
+  for _, s in ipairs(evalSamples) do
     if math.abs(s.steer) > 0.15 then
       if s.brake > 0.05 then
         earlyRelease = false
@@ -250,16 +290,16 @@ local function processCornerStats(samples, cornerAngle, maxObservedLatG)
 
   local apexTimingText = "Ideal"
   local minSpeedIndex = 1
-  for i, s in ipairs(samples) do
+  for i, s in ipairs(evalSamples) do
     if s.speedMs * 3.6 == minSpeedKmh then
       minSpeedIndex = i
       break
     end
   end
-  local pct = minSpeedIndex / #samples
+  local pct = minSpeedIndex / #evalSamples
   local insideDirection = cornerAngle > 0 and 1 or -1
   local maxInsideDev = -math.huge
-  for _, s in ipairs(samples) do
+  for _, s in ipairs(evalSamples) do
     local dev = s.trackPosLat * insideDirection
     if dev > maxInsideDev then
       maxInsideDev = dev
@@ -277,19 +317,21 @@ local function processCornerStats(samples, cornerAngle, maxObservedLatG)
   end
 
   local totalEff = 0
-  for _, s in ipairs(samples) do
+  for _, s in ipairs(evalSamples) do
     local g = math.sqrt(s.accG.x * s.accG.x + s.accG.z * s.accG.z)
     local eff = g / maxObservedLatG
     totalEff = totalEff + eff
   end
-  local avgGripUtil = round((totalEff / #samples) * 100)
+  local avgGripUtil = round((totalEff / #evalSamples) * 100)
   local finalGripUtil = math.min(100, math.max(0, avgGripUtil))
 
   local gripScore = math.min(100, (finalGripUtil / 85) * 100)
   local finalScore = round((speedScore * 0.4) + (trailScore * 0.3) + (gripScore * 0.3))
 
   local grade = "C"
-  if finalScore >= 95 then grade = "S"
+  if wentOffTrack then
+    grade = "FORA"
+  elseif finalScore >= 95 then grade = "S"
   elseif finalScore >= 88 then grade = "A+"
   elseif finalScore >= 80 then grade = "A"
   elseif finalScore >= 70 then grade = "B"
@@ -313,18 +355,28 @@ local function saveSessionFile(lapNumber, lapTimeMs)
 
   initSession()
 
-  -- Calculate sector split times from cumulative sectorEndTimes
+  -- Fallback logic for lapTimeMs if it is nil, zero, or invalid
+  local fallbackTime = 0
+  if #lapSamples > 0 then
+    fallbackTime = lapSamples[#lapSamples].t or 0
+  end
+  lapTimeMs = (type(lapTimeMs) == "number" and lapTimeMs > 0) and lapTimeMs or fallbackTime
+
+  -- Calculate sector split times from cumulative sectorEndTimes (handling sparse tables safely)
   local finalSectors = {}
-  if #sectorEndTimes >= 1 then
-    table.insert(finalSectors, sectorEndTimes[1])
-    for i = 2, #sectorEndTimes do
-      table.insert(finalSectors, sectorEndTimes[i] - sectorEndTimes[i-1])
+  local lastTime = 0
+  for i = 1, 10 do
+    local sTime = sectorEndTimes[i]
+    if type(sTime) == "number" and sTime > 0 then
+      table.insert(finalSectors, sTime - lastTime)
+      lastTime = sTime
     end
-    -- Last sector time
-    table.insert(finalSectors, lapTimeMs - sectorEndTimes[#sectorEndTimes])
+  end
+  -- Last sector time
+  if lapTimeMs > lastTime then
+    table.insert(finalSectors, lapTimeMs - lastTime)
   else
-    -- Fallback if no sector splits captured
-    table.insert(finalSectors, lapTimeMs)
+    table.insert(finalSectors, 0)
   end
 
   -- Update session bests
@@ -346,7 +398,15 @@ local function saveSessionFile(lapNumber, lapTimeMs)
     samples = lapSamples
   }
 
-  table.insert(sessionLaps, lapData)
+  -- To prevent memory/CPU spikes and potential JIT hangs from accumulating multiple laps of samples,
+  -- we save each completed lap in its own telemetry file.
+  local safeTrack = (ac.getTrackID() or "track"):gsub("[^%w%-_]", "_")
+  local safeCar = (ac.getCarID(0) or "car"):gsub("[^%w%-_]", "_")
+  
+  -- Create filename for this specific lap
+  local scriptDir = ac.getFolder(ac.FolderID.ScriptOrigin):gsub("\\", "/")
+  local logDir = scriptDir .. "/telemetry_logs"
+  local lapFilename = string.format("%s/telemetry_%s_%s_lap_%d_%s.json", logDir, safeTrack, safeCar, lapNumber, os.date("%Y%m%d_%H%M%S"))
 
   local sessionData = {
     metadata = {
@@ -355,13 +415,16 @@ local function saveSessionFile(lapNumber, lapTimeMs)
       trackLayout = ac.getTrackLayout() or "",
       carId = ac.getCarID(0) or "unknown",
       carName = ac.getCarName(0) or "Unknown Car",
-      timestamp = sessionTimestamp,
+      timestamp = sessionTimestamp or os.date("%Y-%m-%d %H:%M:%S"),
       bestLatG = round(sessionBestLatG * 100) / 100,
       bestDecelG = round(sessionBestDecelG * 100) / 100,
-      totalLaps = #sessionLaps
+      lapNumber = lapNumber,
+      lapTimeMs = lapTimeMs,
+      sectorTimes = finalSectors
     },
     trackMap = trackMap,
-    laps = sessionLaps
+    corners = lapCorners,
+    samples = lapSamples
   }
 
   local success, jsonStr = pcall(JSON.stringify, sessionData)
@@ -370,14 +433,14 @@ local function saveSessionFile(lapNumber, lapTimeMs)
     return
   end
 
-  io.saveAsync(sessionFilename, jsonStr, function(err)
-    if err then
-      ac.log("[Telemetry Recorder] Failed to save session telemetry file: " .. tostring(err))
-    else
-      ac.log("[Telemetry Recorder] Saved session telemetry to: " .. sessionFilename)
-      ac.setMessage("Race Coach", string.format("Telemetria da volta %d gravada na sessão!", lapNumber))
-    end
-  end)
+  -- Use synchronous io.save to guarantee writing and avoid callback lifecycle issues during lap transitions
+  local saveSuccess = io.save(lapFilename, jsonStr, true)
+  if saveSuccess then
+    ac.log("[Telemetry Recorder] Saved lap telemetry to: " .. lapFilename)
+    ac.setMessage("Race Coach", string.format("Telemetria da volta %d gravada com sucesso!", lapNumber))
+  else
+    ac.log("[Telemetry Recorder] Failed to save lap telemetry file: " .. lapFilename)
+  end
 end
 
 -- Corner tracking state for the current lap
@@ -405,7 +468,23 @@ function M.update(dt)
 
   -- 2. Detect session reset/car teleportation
   if car.resetCounter > lastResetCounter then
-    ac.log("[Telemetry Recorder] Car reset detected. Resetting buffers.")
+    ac.log("[Telemetry Recorder] Car reset detected. Autosaving partial session.")
+    if #lapSamples > 20 then
+      if inCorner and #currentCornerSamples >= 5 then
+        local scorecard = processCornerStats(currentCornerSamples, cornerAngle, physics.maxObservedLatG, car)
+        if scorecard then
+          scorecard.startIndex = cornerStartTelemetryIndex
+          scorecard.endIndex = math.max(cornerStartTelemetryIndex, #lapSamples - 1)
+          table.insert(lapCorners, scorecard)
+        end
+        inCorner = false
+        currentCornerSamples = {}
+      end
+      local ok, err = pcall(saveSessionFile, lastLapCount + 1, car.lapTimeMs)
+      if not ok then
+        ac.log("[Telemetry Recorder] Error saving session file on reset: " .. tostring(err))
+      end
+    end
     lapSamples = {}
     lapCorners = {}
     sectorEndTimes = {}
@@ -421,7 +500,11 @@ function M.update(dt)
   if car.lapCount > lastLapCount then
     -- Save the telemetry for the completed lap if we have enough samples
     if #lapSamples > 50 and lastLapCount > 0 then
-      saveSessionFile(lastLapCount, car.previousLapTimeMs)
+      local ok, err = pcall(saveSessionFile, lastLapCount, car.previousLapTimeMs)
+      if not ok then
+        ac.log("[Telemetry Recorder] Error saving session file on lap cross: " .. tostring(err))
+        ac.setMessage("Race Coach", "Erro ao salvar telemetria da volta: " .. tostring(err))
+      end
     end
     
     -- Clear buffers for the new lap
@@ -480,6 +563,18 @@ function M.update(dt)
       end
     end
 
+    -- Check if wheels are off track (2 or more wheels off track)
+    local offTrackCount = 0
+    if car.wheels then
+      for i = 0, 3 do
+        local wheel = car.wheels[i]
+        if wheel and safeGet(wheel, "surfaceValidTrack", true) == false then
+          offTrackCount = offTrackCount + 1
+        end
+      end
+    end
+    local isOffTrack = offTrackCount >= 2
+
     -- Collect corner sample
     local trackPos = ac.worldCoordinateToTrack(car.position)
     local trackPosLat = trackPos and trackPos.x or 0
@@ -493,7 +588,8 @@ function M.update(dt)
       },
       brake = car.brake,
       steer = car.steer,
-      trackPosLat = trackPosLat
+      trackPosLat = trackPosLat,
+      offTrack = isOffTrack
     })
 
     -- Check corner exit condition
@@ -526,7 +622,7 @@ function M.update(dt)
 
     if shouldExit then
       inCorner = false
-      local scorecard = processCornerStats(currentCornerSamples, cornerAngle, physics.maxObservedLatG)
+      local scorecard = processCornerStats(currentCornerSamples, cornerAngle, physics.maxObservedLatG, car)
       currentCornerSamples = {}
       if scorecard then
         scorecard.startIndex = cornerStartTelemetryIndex
@@ -643,6 +739,43 @@ function M.update(dt)
       table.insert(lapSamples, sample)
     end
   end
+end
+
+function M.getSampleCount()
+  return #lapSamples
+end
+
+function M.savePartialSession()
+  local car = ac.getCar(0)
+  if not car then return end
+  
+  if #lapSamples < 10 then
+    ac.setMessage("Race Coach", "Sem dados suficientes para salvar!")
+    return
+  end
+  
+  ac.log("[Telemetry Recorder] Manual save of partial session triggered.")
+  if inCorner and #currentCornerSamples >= 5 then
+    local scorecard = processCornerStats(currentCornerSamples, cornerAngle, physics.maxObservedLatG, car)
+    if scorecard then
+      scorecard.startIndex = cornerStartTelemetryIndex
+      scorecard.endIndex = math.max(cornerStartTelemetryIndex, #lapSamples - 1)
+      table.insert(lapCorners, scorecard)
+    end
+    inCorner = false
+    currentCornerSamples = {}
+  end
+  
+  local ok, err = pcall(saveSessionFile, car.lapCount + 1, car.lapTimeMs)
+  if not ok then
+    ac.log("[Telemetry Recorder] Error saving session file manually: " .. tostring(err))
+    ac.setMessage("Race Coach", "Erro ao salvar telemetria manual: " .. tostring(err))
+  end
+  
+  lapSamples = {}
+  lapCorners = {}
+  sectorEndTimes = {}
+  lastSector = 0
 end
 
 return M

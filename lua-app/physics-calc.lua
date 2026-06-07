@@ -12,6 +12,8 @@ M.smoothedLatG = 1.3
 M.smoothedDecelG = 1.0
 M.smoothedAccelG = 0.4
 
+M.speedMult = 1.0
+
 -- Helper to safely access object fields that might not exist in older CSP versions
 local function safeGet(obj, field, default)
   if not obj then return default end
@@ -109,8 +111,36 @@ function M.getPhysicsFactors(car, speedMs)
     aeroGripMultiplier = aeroGripMultiplier
   }
 end
+
+local isLimitsInitialized = false
+function M.initializeCarLimits(car)
+  if isLimitsInitialized then return end
+  
+  if safeGet(car, "isOpenWheeler", false) then
+    M.maxObservedLatG = 2.1
+    M.maxObservedDecelG = 1.5
+    M.maxObservedAccelG = 0.8
+  elseif safeGet(car, "isRacingCar", false) then
+    M.maxObservedLatG = 1.4
+    M.maxObservedDecelG = 1.1
+    M.maxObservedAccelG = 0.55
+  else
+    M.maxObservedLatG = 1.05
+    M.maxObservedDecelG = 0.9
+    M.maxObservedAccelG = 0.35
+  end
+  
+  M.smoothedLatG = M.maxObservedLatG
+  M.smoothedDecelG = M.maxObservedDecelG
+  M.smoothedAccelG = M.maxObservedAccelG
+  
+  isLimitsInitialized = true
+end
+
 -- Automatically calibrate session G limits based on vehicle behavior with crash/off-track filtering
 function M.updateGLimits(car)
+  M.initializeCarLimits(car)
+
   -- 1. Ignore updates during collisions to filter out G spikes
   local collisionDepth = safeGet(car, "collisionDepth", 0)
   if collisionDepth > 0.01 then
@@ -132,35 +162,47 @@ function M.updateGLimits(car)
     end
   end
 
-  -- Calibrate lateral G-forces (capped at 5.0G to filter out curb spikes/glitches)
+  -- Define realistic maximum safety ceilings based on car class
+  local maxLatCap = 1.3
+  local maxDecelCap = 1.15
+  if safeGet(car, "isOpenWheeler", false) then
+    maxLatCap = 2.8
+    maxDecelCap = 2.0
+  elseif safeGet(car, "isRacingCar", false) then
+    maxLatCap = 1.8
+    maxDecelCap = 1.45
+  end
+
   local acc = safeGet(car, "acceleration", nil)
+
+  -- Calibrate lateral G-forces (slow filter to prevent curb strikes from inflating limits)
   local accX = acc and math.abs(acc.x) or 0
-  M.smoothedLatG = M.smoothedLatG + (accX - M.smoothedLatG) * 0.3
-  if M.smoothedLatG > M.maxObservedLatG and M.smoothedLatG < 5.0 then
+  M.smoothedLatG = M.smoothedLatG + (accX - M.smoothedLatG) * 0.005
+  if M.smoothedLatG > M.maxObservedLatG and M.smoothedLatG < maxLatCap then
     M.maxObservedLatG = M.smoothedLatG
   end
 
-  -- Calibrate deceleration G-forces (capped at 5.0G to filter out curb spikes/glitches)
+  -- Calibrate deceleration G-forces (slow filter when braking, decays when not)
   local accZ = acc and acc.z or 0
   local decelG = -accZ
   if car.brake > 0.5 then
-    M.smoothedDecelG = M.smoothedDecelG + (decelG - M.smoothedDecelG) * 0.3
-    if M.smoothedDecelG > M.maxObservedDecelG and M.smoothedDecelG < 5.0 then
+    M.smoothedDecelG = M.smoothedDecelG + (decelG - M.smoothedDecelG) * 0.005
+    if M.smoothedDecelG > M.maxObservedDecelG and M.smoothedDecelG < maxDecelCap then
       M.maxObservedDecelG = M.smoothedDecelG
     end
   else
-    M.smoothedDecelG = M.smoothedDecelG + (0 - M.smoothedDecelG) * 0.3
+    M.smoothedDecelG = M.smoothedDecelG + (0 - M.smoothedDecelG) * 0.02
   end
 
-  -- Calibrate acceleration G-forces (capped at 2.0G to filter out spikes/glitches)
+  -- Calibrate acceleration G-forces (slow filter when accelerating, decays when not)
   local accelG = accZ
   if car.gas > 0.8 then
-    M.smoothedAccelG = M.smoothedAccelG + (accelG - M.smoothedAccelG) * 0.3
+    M.smoothedAccelG = M.smoothedAccelG + (accelG - M.smoothedAccelG) * 0.005
     if M.smoothedAccelG > M.maxObservedAccelG and M.smoothedAccelG < 2.0 then
       M.maxObservedAccelG = M.smoothedAccelG
     end
   else
-    M.smoothedAccelG = M.smoothedAccelG + (0 - M.smoothedAccelG) * 0.3
+    M.smoothedAccelG = M.smoothedAccelG + (0 - M.smoothedAccelG) * 0.02
   end
 end
 
@@ -194,13 +236,12 @@ function M.calculateTurnPhysicsForAngle(car, angle, roadGrip, speedMs)
   local brakingFactors = M.getPhysicsFactors(car, avgBrakingSpeedMs)
   local targetDecel = M.maxObservedDecelG * 9.81 * 0.80 * math.max(0.5, roadGrip) * brakingFactors.aeroGripMultiplier * brakingFactors.brakeEfficiency
   
-  local reactionDistance = speedMs * 0.3
-
-  local physicalBrakingDistance = 0
+  local totalBrakingDistanceNeeded = 0
   if speedMs > vTarget then
-    physicalBrakingDistance = (speedMs * speedMs - vTarget * vTarget) / (2 * targetDecel)
+    local physicalBrakingDistance = (speedMs * speedMs - vTarget * vTarget) / (2 * targetDecel)
+    local reactionDistance = speedMs * 0.3
+    totalBrakingDistanceNeeded = (physicalBrakingDistance + reactionDistance) * config.brakingMargin
   end
-  local totalBrakingDistanceNeeded = (physicalBrakingDistance + reactionDistance) * config.brakingMargin
 
   return vTarget, totalBrakingDistanceNeeded
 end
@@ -233,12 +274,13 @@ function M.calculateTurnPhysics(car, upcomingTurn, roadGrip)
       local avgBrakingSpeedMs = (car.speedMs + vTarget) / 2
       local brakingFactors = M.getPhysicsFactors(car, avgBrakingSpeedMs)
       local targetDecel = M.maxObservedDecelG * 9.81 * 0.80 * math.max(0.5, roadGrip) * brakingFactors.aeroGripMultiplier * brakingFactors.brakeEfficiency
-      local reactionDistance = car.speedMs * 0.3
-      local physicalBrakingDistance = 0
       if car.speedMs > vTarget then
-        physicalBrakingDistance = (car.speedMs * car.speedMs - vTarget * vTarget) / (2 * targetDecel)
+        local physicalBrakingDistance = (car.speedMs * car.speedMs - vTarget * vTarget) / (2 * targetDecel)
+        local reactionDistance = car.speedMs * 0.3
+        totalBrakingDistanceNeeded = (physicalBrakingDistance + reactionDistance) * config.brakingMargin
+      else
+        totalBrakingDistanceNeeded = 0
       end
-      totalBrakingDistanceNeeded = (physicalBrakingDistance + reactionDistance) * config.brakingMargin
     end
   end
 

@@ -8,4 +8,8 @@ local config = ac.storage{
   overlayOpacity = 0.75
 }
 
+-- Clamp loaded values to safe UI slider ranges
+config.brakingMargin = math.min(1.3, math.max(0.7, config.brakingMargin))
+config.cornerSpeedBias = math.min(1.2, math.max(0.8, config.cornerSpeedBias))
+
 return config

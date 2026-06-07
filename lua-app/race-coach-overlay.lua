@@ -117,6 +117,18 @@ function windowSettings(dt)
     config.brakingMargin = brakeVal / 100
   end
   ui.textColored("Ajusta a distância de frenagem (menor = freia mais tarde/perigoso).", rgbm(0.6, 0.6, 0.6, 1.0))
+  
+  ui.separator()
+  ui.offsetCursorY(6)
+  ui.header("Gravação de Telemetria")
+  
+  local sampleCount = recorder.getSampleCount()
+  ui.text(string.format("Amostras coletadas nesta volta: %d", sampleCount))
+  
+  if ui.button("Gravar Telemetria Parcial", vec2(-1, 0)) then
+    recorder.savePartialSession()
+  end
+  ui.textColored("Grava as amostras acumuladas até o momento em um arquivo JSON na pasta 'telemetry_logs' (útil para voltas incompletas).", rgbm(0.6, 0.6, 0.6, 1.0))
 end
 
 -- Register settings panel in Content Manager / AC side bar settings context
@@ -159,6 +171,14 @@ ui.addSettings({
   if brakeChanged then
     config.brakingMargin = brakeVal / 100
   end
+
+  ui.separator()
+  ui.header("Telemetria")
+  local sampleCount = recorder.getSampleCount()
+  ui.text(string.format("Amostras coletadas: %d", sampleCount))
+  if ui.button("Gravar Telemetria Parcial", vec2(-1, 0)) then
+    recorder.savePartialSession()
+  end
 end)
 
 
@@ -184,7 +204,7 @@ function script.update(dt)
     physics.calculateTurnPhysics(car, upcomingTurn, roadGrip)
 
   -- 4. Draw speed-relative racing line and optimized braking point on track
-  painter.drawRacingLine(
+  local drawSuccess, drawErr = pcall(painter.drawRacingLine,
     car, 
     sim, 
     nextTurnDist, 
@@ -193,10 +213,16 @@ function script.update(dt)
     totalBrakingDistanceNeeded,
     physics.maxObservedDecelG
   )
+  if not drawSuccess then
+    ac.log("[Race Coach Coordinator] Draw racing line error: " .. tostring(drawErr))
+    ac.setMessage("Race Coach Error", "Erro ao desenhar linha: " .. tostring(drawErr))
+  end
 
-  -- 5. Record telemetry data
-  local scorecard = recorder.update(dt)
-  if scorecard then
+  -- 5. Record telemetry data (safely encapsulated to protect paint loop from telemetry crashes)
+  local recordSuccess, scorecard = pcall(recorder.update, dt)
+  if not recordSuccess then
+    ac.log("[Race Coach Coordinator] Telemetry recording error: " .. tostring(scorecard))
+  elseif scorecard then
     local jsonSuccess, jsonStr = pcall(JSON.stringify, scorecard)
     if jsonSuccess and jsonStr then
       if browserHud then
