@@ -7,6 +7,7 @@
   var compareMode = false;
   var currentSampleIndex = 0;
   var trackMapColorMode = "THR";
+  var selectedCornerIdx = null;
   var isPlaying = false;
   var playSpeed = 1;
   var lastFrameTime = 0;
@@ -257,6 +258,7 @@
   }
   function loadLapAData() {
     if (!sessionData || !activeLapA) return;
+    selectedCornerIdx = null;
     isPlaying = false;
     if (btnPlayPause) btnPlayPause.innerText = "\u25B6";
     fractionalSampleIndex = 0;
@@ -351,6 +353,7 @@
       row.addEventListener("click", () => {
         document.querySelectorAll(".corner-row").forEach((r) => r.classList.remove("selected"));
         row.classList.add("selected");
+        selectedCornerIdx = idx;
         if (c.startIndex !== void 0 && c.endIndex !== void 0) {
           focusMapOnSamples(c.startIndex, c.endIndex);
           if (scrubber) {
@@ -359,6 +362,7 @@
             updateSelectedPoint();
           }
         }
+        drawTrackMap();
       });
       cornerRowsAnchor.appendChild(row);
     });
@@ -373,16 +377,23 @@
       return `- Curva ${idx + 1}: Nota ${c.grade} (V. M\xEDnima: ${Math.round(c.minSpeedKmh)} km/h | Ideal: ${Math.round(c.targetSpeedKmh)} km/h). Trail braking: ${c.trailScore}%. Uso do Grip: ${c.gripUtilization}%. Timing do \xC1pice: ${c.apexTiming}.
 `;
     }
-    const entry = samples[0];
-    const exit = samples[samples.length - 1];
+    const entryIdx = c.entryIndex !== void 0 ? c.entryIndex - c.startIndex : 0;
+    const apexIdx = c.apexIndex !== void 0 ? c.apexIndex - c.startIndex : -1;
+    const exitIdx = c.exitIndex !== void 0 ? c.exitIndex - c.startIndex : samples.length - 1;
+    const entry = samples[entryIdx] || samples[0];
+    const exit = samples[exitIdx] || samples[samples.length - 1];
     let apex = samples[0];
-    let minSpeed = samples[0].speed;
-    samples.forEach((s) => {
-      if (s.speed < minSpeed) {
-        minSpeed = s.speed;
-        apex = s;
-      }
-    });
+    if (apexIdx >= 0 && samples[apexIdx]) {
+      apex = samples[apexIdx];
+    } else {
+      let minSpeed = samples[0].speed;
+      samples.forEach((s) => {
+        if (s.speed < minSpeed) {
+          minSpeed = s.speed;
+          apex = s;
+        }
+      });
+    }
     let undCount = 0, oveCount = 0, spinCount = 0, lockCount = 0;
     let maxUnd = 0, maxOve = 0, maxSpin = 0, maxLock = 0;
     samples.forEach((s) => {
@@ -404,7 +415,7 @@
       }
     });
     const formatGear = (g) => g === -1 ? "R" : g === 0 ? "N" : g.toString();
-    let detail = `- Curva ${idx + 1}: Nota ${c.grade} (V. M\xEDnima: ${Math.round(c.minSpeedKmh)} km/h | Ideal: ${Math.round(c.targetSpeedKmh)} km/h | Trail: ${c.trailScore}% | Grip: ${c.gripUtilization}% | \xC1pice: ${c.apexTiming})
+    let detail = `- Curva ${idx + 1}: Nota ${c.grade} (V. M\xEDnima: ${Math.round(c.minSpeedKmh)} km/h | Ideal: ${Math.round(c.targetSpeedKmh)} km/h | Trail: ${c.trailScore}% | Grip: ${c.gripUtilization}%${c.exitScore !== void 0 ? ` | Sa\xEDda/Acel: ${c.exitScore}%` : ""} | \xC1pice: ${c.apexTiming})
 `;
     detail += `  * Entrada: Vel: ${Math.round(entry.speed)} km/h, Marcha: ${formatGear(entry.gear)}, Acel: ${Math.round(entry.thr * 100)}%, Freio: ${Math.round(entry.brk * 100)}%, Ester\xE7o: ${Math.round(entry.steer * 100)}%, G-Lat: ${entry.gLat.toFixed(2)}G, G-Long: ${entry.gLong.toFixed(2)}G
 `;
@@ -432,16 +443,23 @@
       }
       const samples = lap.samples.slice(c.startIndex, c.endIndex + 1);
       if (samples.length === 0) return null;
-      const entry = samples[0];
-      const exit = samples[samples.length - 1];
+      const entryIdx = c.entryIndex !== void 0 ? c.entryIndex - c.startIndex : 0;
+      const apexIdx = c.apexIndex !== void 0 ? c.apexIndex - c.startIndex : -1;
+      const exitIdx = c.exitIndex !== void 0 ? c.exitIndex - c.startIndex : samples.length - 1;
+      const entry = samples[entryIdx] || samples[0];
+      const exit = samples[exitIdx] || samples[samples.length - 1];
       let apex = samples[0];
-      let minSpeed = samples[0].speed;
-      samples.forEach((s) => {
-        if (s.speed < minSpeed) {
-          minSpeed = s.speed;
-          apex = s;
-        }
-      });
+      if (apexIdx >= 0 && samples[apexIdx]) {
+        apex = samples[apexIdx];
+      } else {
+        let minSpeed = samples[0].speed;
+        samples.forEach((s) => {
+          if (s.speed < minSpeed) {
+            minSpeed = s.speed;
+            apex = s;
+          }
+        });
+      }
       let undCount = 0, oveCount = 0, spinCount = 0, lockCount = 0;
       let maxUnd = 0, maxOve = 0, maxSpin = 0, maxLock = 0;
       samples.forEach((s) => {
@@ -467,7 +485,7 @@
     const pA = getPoints(lapA, cA);
     const pB = getPoints(lapB, cB);
     const formatGear = (g) => g === -1 ? "R" : g === 0 ? "N" : g.toString();
-    detail += `  [Volta A (Principal)] Nota ${cA.grade} | V.M\xEDnima: ${Math.round(cA.minSpeedKmh)} km/h | Ideal: ${Math.round(cA.targetSpeedKmh)} km/h | Trail: ${cA.trailScore}% | Grip: ${cA.gripUtilization}% | \xC1pice: ${cA.apexTiming}
+    detail += `  [Volta A (Principal)] Nota ${cA.grade} | V.M\xEDnima: ${Math.round(cA.minSpeedKmh)} km/h | Ideal: ${Math.round(cA.targetSpeedKmh)} km/h | Trail: ${cA.trailScore}% | Grip: ${cA.gripUtilization}%${cA.exitScore !== void 0 ? ` | Sa\xEDda/Acel: ${cA.exitScore}%` : ""} | \xC1pice: ${cA.apexTiming}
 `;
     if (pA) {
       detail += `    * Entrada: Vel: ${Math.round(pA.entry.speed)} km/h, Marcha: ${formatGear(pA.entry.gear)}, Acel: ${Math.round(pA.entry.thr * 100)}%, Freio: ${Math.round(pA.entry.brk * 100)}%, Ester\xE7o: ${Math.round(pA.entry.steer * 100)}%, G-Lat: ${pA.entry.gLat.toFixed(2)}G, G-Long: ${pA.entry.gLong.toFixed(2)}G
@@ -486,7 +504,7 @@
 `;
       }
     }
-    detail += `  [Volta B (Refer\xEAncia)] Nota ${cB.grade} | V.M\xEDnima: ${Math.round(cB.minSpeedKmh)} km/h | Ideal: ${Math.round(cB.targetSpeedKmh)} km/h | Trail: ${cB.trailScore}% | Grip: ${cB.gripUtilization}% | \xC1pice: ${cB.apexTiming}
+    detail += `  [Volta B (Refer\xEAncia)] Nota ${cB.grade} | V.M\xEDnima: ${Math.round(cB.minSpeedKmh)} km/h | Ideal: ${Math.round(cB.targetSpeedKmh)} km/h | Trail: ${cB.trailScore}% | Grip: ${cB.gripUtilization}%${cB.exitScore !== void 0 ? ` | Sa\xEDda/Acel: ${cB.exitScore}%` : ""} | \xC1pice: ${cB.apexTiming}
 `;
     if (pB) {
       detail += `    * Entrada: Vel: ${Math.round(pB.entry.speed)} km/h, Marcha: ${formatGear(pB.entry.gear)}, Acel: ${Math.round(pB.entry.thr * 100)}%, Freio: ${Math.round(pB.entry.brk * 100)}%, Ester\xE7o: ${Math.round(pB.entry.steer * 100)}%, G-Lat: ${pB.entry.gLat.toFixed(2)}G, G-Long: ${pB.entry.gLong.toFixed(2)}G
@@ -1174,6 +1192,49 @@ Por favor, fa\xE7a um review detalhado sobre o meu estilo de pilotagem. Destaque
         ctx.fill();
         ctx.stroke();
       }
+    }
+    if (selectedCornerIdx !== null && activeLapA.corners[selectedCornerIdx]) {
+      const c = activeLapA.corners[selectedCornerIdx];
+      const samples = activeLapA.samples;
+      const entryIdx = c.entryIndex !== void 0 ? c.entryIndex : c.startIndex;
+      const apexIdx = c.apexIndex !== void 0 ? c.apexIndex : -1;
+      const exitIdx = c.exitIndex !== void 0 ? c.exitIndex : c.endIndex;
+      let finalApexIdx = apexIdx;
+      if (finalApexIdx === -1 && c.startIndex !== void 0 && c.endIndex !== void 0) {
+        let minSpeed = Infinity;
+        for (let i = c.startIndex; i <= c.endIndex; i++) {
+          if (samples[i] && samples[i].speed < minSpeed) {
+            minSpeed = samples[i].speed;
+            finalApexIdx = i;
+          }
+        }
+      }
+      const drawMarker = (sampleIdx, color, label) => {
+        if (sampleIdx === void 0 || !samples[sampleIdx]) return;
+        const s = samples[sampleIdx];
+        const x = s.x * mapZoom + mapOffsetX;
+        const y = s.z * mapZoom + mapOffsetY;
+        ctx.fillStyle = color + "40";
+        ctx.beginPath();
+        ctx.arc(x, y, 9, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.fillStyle = color;
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(x, y, 4.5, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 10px Outfit, sans-serif";
+        ctx.shadowColor = "rgba(0, 0, 0, 0.8)";
+        ctx.shadowBlur = 4;
+        ctx.fillText(label, x + 8, y + 3);
+        ctx.shadowBlur = 0;
+      };
+      if (entryIdx !== void 0) drawMarker(entryIdx, "#10b981", "Entrada");
+      if (finalApexIdx !== -1) drawMarker(finalApexIdx, "#f59e0b", "\xC1pice");
+      if (exitIdx !== void 0) drawMarker(exitIdx, "#3b82f6", "Sa\xEDda");
     }
   }
   function drawCharts() {

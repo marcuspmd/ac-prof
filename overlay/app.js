@@ -217,6 +217,7 @@
   var scorecardTrailScore = null;
   var scorecardApexTiming = null;
   var scorecardGripUtil = null;
+  var scorecardExitScore = null;
   var coachPanel = null;
   var coachMessage = null;
   var scorecardTimeout = null;
@@ -234,6 +235,7 @@
     scorecardTrailScore = document.getElementById("scorecard-trail-score");
     scorecardApexTiming = document.getElementById("scorecard-apex-timing");
     scorecardGripUtil = document.getElementById("scorecard-grip-util");
+    scorecardExitScore = document.getElementById("scorecard-exit-score");
     coachPanel = document.getElementById("coach-panel");
     coachMessage = document.getElementById("coach-message");
   }
@@ -472,6 +474,14 @@
     scorecardTrailScore.innerText = `${Math.round(scorecard.trailScore)}%`;
     scorecardApexTiming.innerText = scorecard.apexTiming;
     scorecardGripUtil.innerText = `${Math.round(scorecard.gripUtilization)}%`;
+    if (scorecardExitScore) {
+      if (scorecard.exitScore !== void 0) {
+        scorecardExitScore.innerText = `${Math.round(scorecard.exitScore)}%`;
+        scorecardExitScore.parentElement.style.display = "flex";
+      } else {
+        scorecardExitScore.parentElement.style.display = "none";
+      }
+    }
     scorecardOverlay.classList.remove("scorecard-hidden");
     if (scorecardTimeout) clearTimeout(scorecardTimeout);
     scorecardTimeout = setTimeout(() => {
@@ -641,6 +651,7 @@
           minSpeedKmh: 84,
           targetSpeedKmh: 80,
           trailScore: 88,
+          exitScore: 90,
           apexTiming: "Perfeito",
           gripUtilization: 82
         };

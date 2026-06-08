@@ -228,14 +228,45 @@ local function processCornerStats(samples, cornerAngle, maxObservedLatG, car)
     end
   end
 
+  -- 1. Find Apex Point (point of minimum speed)
   local minSpeedMs = math.huge
-  for _, s in ipairs(evalSamples) do
+  local minSpeedIndex = 1
+  for i, s in ipairs(evalSamples) do
     if s.speedMs < minSpeedMs then
       minSpeedMs = s.speedMs
+      minSpeedIndex = i
     end
   end
   local minSpeedKmh = minSpeedMs * 3.6
 
+  -- 2. Find Entry Point (where steering, braking, or lateral G begins to build up)
+  local entryIndex = 1
+  for i = 1, minSpeedIndex do
+    local s = evalSamples[i]
+    local latG = math.abs(s.accG.x)
+    local steerVal = math.abs(s.steer)
+    if steerVal > 0.05 or s.brake > 0.05 or latG > 0.15 then
+      entryIndex = i
+      break
+    end
+  end
+
+  -- 3. Find Exit Point (where steering/lateral G returns to straight line post-apex)
+  local exitIndex = #evalSamples
+  for i = #evalSamples, minSpeedIndex, -1 do
+    local s = evalSamples[i]
+    local latG = math.abs(s.accG.x)
+    local steerVal = math.abs(s.steer)
+    if steerVal > 0.08 or latG > 0.20 or s.brake > 0.05 then
+      exitIndex = i
+      break
+    end
+  end
+  if exitIndex < minSpeedIndex then
+    exitIndex = minSpeedIndex
+  end
+
+  -- Target Speed (Apex speed)
   local targetKmh = 0
   if car then
     local vTargetMs, _ = physics.calculateTurnPhysicsForAngle(car, cornerAngle, evalSamples[1].roadGrip, evalSamples[1].speedMs)
@@ -257,12 +288,14 @@ local function processCornerStats(samples, cornerAngle, maxObservedLatG, car)
     speedScore = math.max(0, 100 - math.abs(speedDiff) * 2.5)
   end
 
+  -- 4. Trail Braking (only evaluate during Entry phase: entryIndex to minSpeedIndex)
   local trailBrakingSamples = 0
   local perfectTrailSamples = 0
   local highBrakeSteerSamples = 0
   local earlyRelease = true
 
-  for _, s in ipairs(evalSamples) do
+  for i = entryIndex, minSpeedIndex do
+    local s = evalSamples[i]
     if math.abs(s.steer) > 0.15 then
       if s.brake > 0.05 then
         earlyRelease = false
@@ -288,14 +321,70 @@ local function processCornerStats(samples, cornerAngle, maxObservedLatG, car)
     trailScore = 100
   end
 
-  local apexTimingText = "Ideal"
-  local minSpeedIndex = 1
-  for i, s in ipairs(evalSamples) do
-    if s.speedMs * 3.6 == minSpeedKmh then
-      minSpeedIndex = i
-      break
-    end
+  -- 5. Grip Utilization (evaluate specifically from Entry to Exit)
+  local totalEff = 0
+  local activeCount = 0
+  for i = entryIndex, exitIndex do
+    local s = evalSamples[i]
+    local g = math.sqrt(s.accG.x * s.accG.x + s.accG.z * s.accG.z)
+    local eff = g / maxObservedLatG
+    totalEff = totalEff + eff
+    activeCount = activeCount + 1
   end
+  local avgGripUtil = activeCount > 0 and round((totalEff / activeCount) * 100) or 0
+  local finalGripUtil = math.min(100, math.max(0, avgGripUtil))
+
+  -- 6. Exit Throttle Application Score (evaluate during Exit phase: minSpeedIndex to exitIndex)
+  local exitThrottleSum = 0
+  local exitThrottleCount = 0
+  local maxThrottle = 0
+  local throttleLifts = 0
+  local lastThrottle = -1
+  
+  for i = minSpeedIndex, exitIndex do
+    local s = evalSamples[i]
+    exitThrottleSum = exitThrottleSum + s.thr
+    exitThrottleCount = exitThrottleCount + 1
+    if s.thr > maxThrottle then
+      maxThrottle = s.thr
+    end
+    
+    if lastThrottle >= 0 then
+      -- Detect throttle lifts on exit (loss of momentum)
+      if s.thr < lastThrottle - 0.15 and lastThrottle > 0.3 then
+        throttleLifts = throttleLifts + 1
+      end
+    end
+    lastThrottle = s.thr
+  end
+  
+  local avgThrottle = exitThrottleCount > 0 and (exitThrottleSum / exitThrottleCount) or 0
+  local exitScore = 0
+  if maxThrottle > 0.1 then
+    local throttleReachScore = maxThrottle * 50
+    local throttleAvgScore = avgThrottle * 50
+    exitScore = throttleReachScore + throttleAvgScore
+    exitScore = exitScore - (throttleLifts * 25)
+    
+    -- Penalize wheelspin on exit
+    local maxWheelspin = 0
+    for i = minSpeedIndex, exitIndex do
+      local s = evalSamples[i]
+      if s.spin and s.spin > maxWheelspin then
+        maxWheelspin = s.spin
+      end
+    end
+    if maxWheelspin > 0 then
+      exitScore = exitScore - (maxWheelspin * 100)
+    end
+    
+    exitScore = math.max(0, math.min(100, round(exitScore)))
+  else
+    exitScore = 0
+  end
+
+  -- Apex Timing Text
+  local apexTimingText = "Ideal"
   local pct = minSpeedIndex / #evalSamples
   local insideDirection = cornerAngle > 0 and 1 or -1
   local maxInsideDev = -math.huge
@@ -316,17 +405,8 @@ local function processCornerStats(samples, cornerAngle, maxObservedLatG, car)
     apexTimingText = "Perfeito"
   end
 
-  local totalEff = 0
-  for _, s in ipairs(evalSamples) do
-    local g = math.sqrt(s.accG.x * s.accG.x + s.accG.z * s.accG.z)
-    local eff = g / maxObservedLatG
-    totalEff = totalEff + eff
-  end
-  local avgGripUtil = round((totalEff / #evalSamples) * 100)
-  local finalGripUtil = math.min(100, math.max(0, avgGripUtil))
-
-  local gripScore = math.min(100, (finalGripUtil / 85) * 100)
-  local finalScore = round((speedScore * 0.4) + (trailScore * 0.3) + (gripScore * 0.3))
+  -- Calculate weighted score: Speed (35%), Trail Braking (25%), Grip (20%), Exit Throttle (20%)
+  local finalScore = round((speedScore * 0.35) + (trailScore * 0.25) + (finalGripUtil * 0.20) + (exitScore * 0.20))
 
   local grade = "C"
   if wentOffTrack then
@@ -344,8 +424,12 @@ local function processCornerStats(samples, cornerAngle, maxObservedLatG, car)
     minSpeedKmh = round(minSpeedKmh * 10) / 10,
     targetSpeedKmh = round(targetKmh * 10) / 10,
     trailScore = trailScore,
+    exitScore = exitScore,
     apexTiming = apexTimingText,
-    gripUtilization = finalGripUtil
+    gripUtilization = finalGripUtil,
+    entryIndex = entryIndex,
+    apexIndex = minSpeedIndex,
+    exitIndex = exitIndex
   }
 end
 
@@ -475,6 +559,9 @@ function M.update(dt)
         if scorecard then
           scorecard.startIndex = cornerStartTelemetryIndex
           scorecard.endIndex = math.max(cornerStartTelemetryIndex, #lapSamples - 1)
+          scorecard.entryIndex = cornerStartTelemetryIndex + scorecard.entryIndex - 1
+          scorecard.apexIndex = cornerStartTelemetryIndex + scorecard.apexIndex - 1
+          scorecard.exitIndex = cornerStartTelemetryIndex + scorecard.exitIndex - 1
           table.insert(lapCorners, scorecard)
         end
         inCorner = false
@@ -627,6 +714,9 @@ function M.update(dt)
       if scorecard then
         scorecard.startIndex = cornerStartTelemetryIndex
         scorecard.endIndex = math.max(cornerStartTelemetryIndex, #lapSamples - 1)
+        scorecard.entryIndex = cornerStartTelemetryIndex + scorecard.entryIndex - 1
+        scorecard.apexIndex = cornerStartTelemetryIndex + scorecard.apexIndex - 1
+        scorecard.exitIndex = cornerStartTelemetryIndex + scorecard.exitIndex - 1
         table.insert(lapCorners, scorecard)
         return scorecard
       end
@@ -760,6 +850,9 @@ function M.savePartialSession()
     if scorecard then
       scorecard.startIndex = cornerStartTelemetryIndex
       scorecard.endIndex = math.max(cornerStartTelemetryIndex, #lapSamples - 1)
+      scorecard.entryIndex = cornerStartTelemetryIndex + scorecard.entryIndex - 1
+      scorecard.apexIndex = cornerStartTelemetryIndex + scorecard.apexIndex - 1
+      scorecard.exitIndex = cornerStartTelemetryIndex + scorecard.exitIndex - 1
       table.insert(lapCorners, scorecard)
     end
     inCorner = false

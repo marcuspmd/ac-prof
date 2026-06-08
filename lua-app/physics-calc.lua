@@ -240,7 +240,14 @@ function M.calculateTurnPhysicsForAngle(car, angle, roadGrip, speedMs)
   if speedMs > vTarget then
     local physicalBrakingDistance = (speedMs * speedMs - vTarget * vTarget) / (2 * targetDecel)
     local reactionDistance = speedMs * 0.3
-    totalBrakingDistanceNeeded = (physicalBrakingDistance + reactionDistance) * config.brakingMargin
+    
+    -- Adjustment for trail braking phase (from corner entry to apex)
+    -- Deceleration is lower during turn-in, so we must brake earlier.
+    local trailDist = math.max(12, math.min(45, 12 + absAngle * 0.2))
+    local trailDecelRatio = 0.40 -- trail braking is ~40% of straight-line decel
+    local trailAdjustment = trailDist * (1.0 - trailDecelRatio)
+    
+    totalBrakingDistanceNeeded = (physicalBrakingDistance + reactionDistance + trailAdjustment) * config.brakingMargin
   end
 
   return vTarget, totalBrakingDistanceNeeded

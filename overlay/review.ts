@@ -32,10 +32,14 @@ interface CornerRating {
   minSpeedKmh: number;
   targetSpeedKmh: number;
   trailScore: number;
+  exitScore?: number;
   apexTiming: string;
   gripUtilization: number;
   startIndex?: number;
   endIndex?: number;
+  entryIndex?: number;
+  apexIndex?: number;
+  exitIndex?: number;
 }
 
 interface TelemetryLap {
@@ -75,6 +79,7 @@ let activeLapB: TelemetryLap | null = null;
 let compareMode = false;
 let currentSampleIndex = 0;
 let trackMapColorMode: "THR" | "SPD" = "THR"; // "THR" = Throttle/Brake, "SPD" = Speed
+let selectedCornerIdx: number | null = null;
 
 // Playback states
 let isPlaying = false;
@@ -384,6 +389,8 @@ function loadDashboard(): void {
 function loadLapAData(): void {
   if (!sessionData || !activeLapA) return;
 
+  selectedCornerIdx = null; // Reset corner selection
+
   // Reset playback state on lap reload
   isPlaying = false;
   if (btnPlayPause) btnPlayPause.innerText = "▶";
@@ -492,6 +499,7 @@ function renderCornerTable(): void {
     row.addEventListener("click", () => {
       document.querySelectorAll(".corner-row").forEach(r => r.classList.remove("selected"));
       row.classList.add("selected");
+      selectedCornerIdx = idx;
       
       if (c.startIndex !== undefined && c.endIndex !== undefined) {
         focusMapOnSamples(c.startIndex, c.endIndex);
@@ -502,6 +510,7 @@ function renderCornerTable(): void {
           updateSelectedPoint();
         }
       }
+      drawTrackMap();
     });
 
     cornerRowsAnchor.appendChild(row);
@@ -518,17 +527,25 @@ function getCornerPromptAnalysis(lap: TelemetryLap, c: CornerRating, idx: number
     return `- Curva ${idx + 1}: Nota ${c.grade} (V. Mínima: ${Math.round(c.minSpeedKmh)} km/h | Ideal: ${Math.round(c.targetSpeedKmh)} km/h). Trail braking: ${c.trailScore}%. Uso do Grip: ${c.gripUtilization}%. Timing do Ápice: ${c.apexTiming}.\n`;
   }
 
-  const entry = samples[0];
-  const exit = samples[samples.length - 1];
+  const entryIdx = c.entryIndex !== undefined ? (c.entryIndex - c.startIndex) : 0;
+  const apexIdx = c.apexIndex !== undefined ? (c.apexIndex - c.startIndex) : -1;
+  const exitIdx = c.exitIndex !== undefined ? (c.exitIndex - c.startIndex) : samples.length - 1;
+
+  const entry = samples[entryIdx] || samples[0];
+  const exit = samples[exitIdx] || samples[samples.length - 1];
 
   let apex = samples[0];
-  let minSpeed = samples[0].speed;
-  samples.forEach(s => {
-    if (s.speed < minSpeed) {
-      minSpeed = s.speed;
-      apex = s;
-    }
-  });
+  if (apexIdx >= 0 && samples[apexIdx]) {
+    apex = samples[apexIdx];
+  } else {
+    let minSpeed = samples[0].speed;
+    samples.forEach(s => {
+      if (s.speed < minSpeed) {
+        minSpeed = s.speed;
+        apex = s;
+      }
+    });
+  }
 
   // Calculate lost grip occurrences
   let undCount = 0, oveCount = 0, spinCount = 0, lockCount = 0;
@@ -543,7 +560,7 @@ function getCornerPromptAnalysis(lap: TelemetryLap, c: CornerRating, idx: number
 
   const formatGear = (g: number) => g === -1 ? "R" : g === 0 ? "N" : g.toString();
 
-  let detail = `- Curva ${idx + 1}: Nota ${c.grade} (V. Mínima: ${Math.round(c.minSpeedKmh)} km/h | Ideal: ${Math.round(c.targetSpeedKmh)} km/h | Trail: ${c.trailScore}% | Grip: ${c.gripUtilization}% | Ápice: ${c.apexTiming})\n`;
+  let detail = `- Curva ${idx + 1}: Nota ${c.grade} (V. Mínima: ${Math.round(c.minSpeedKmh)} km/h | Ideal: ${Math.round(c.targetSpeedKmh)} km/h | Trail: ${c.trailScore}% | Grip: ${c.gripUtilization}%${c.exitScore !== undefined ? ` | Saída/Acel: ${c.exitScore}%` : ''} | Ápice: ${c.apexTiming})\n`;
   detail += `  * Entrada: Vel: ${Math.round(entry.speed)} km/h, Marcha: ${formatGear(entry.gear)}, Acel: ${Math.round(entry.thr * 100)}%, Freio: ${Math.round(entry.brk * 100)}%, Esterço: ${Math.round(entry.steer * 100)}%, G-Lat: ${entry.gLat.toFixed(2)}G, G-Long: ${entry.gLong.toFixed(2)}G\n`;
   detail += `  * Ápice:   Vel: ${Math.round(apex.speed)} km/h, Marcha: ${formatGear(apex.gear)}, Acel: ${Math.round(apex.thr * 100)}%, Freio: ${Math.round(apex.brk * 100)}%, Esterço: ${Math.round(apex.steer * 100)}%, G-Lat: ${apex.gLat.toFixed(2)}G, G-Long: ${apex.gLong.toFixed(2)}G\n`;
   detail += `  * Saída:   Vel: ${Math.round(exit.speed)} km/h, Marcha: ${formatGear(exit.gear)}, Acel: ${Math.round(exit.thr * 100)}%, Freio: ${Math.round(exit.brk * 100)}%, Esterço: ${Math.round(exit.steer * 100)}%, G-Lat: ${exit.gLat.toFixed(2)}G, G-Long: ${exit.gLong.toFixed(2)}G\n`;
@@ -570,16 +587,25 @@ function getCornerPromptCompareAnalysis(lapA: TelemetryLap, cA: CornerRating, la
     const samples = lap.samples.slice(c.startIndex, c.endIndex + 1);
     if (samples.length === 0) return null;
     
-    const entry = samples[0];
-    const exit = samples[samples.length - 1];
+    const entryIdx = c.entryIndex !== undefined ? (c.entryIndex - c.startIndex) : 0;
+    const apexIdx = c.apexIndex !== undefined ? (c.apexIndex - c.startIndex) : -1;
+    const exitIdx = c.exitIndex !== undefined ? (c.exitIndex - c.startIndex) : samples.length - 1;
+
+    const entry = samples[entryIdx] || samples[0];
+    const exit = samples[exitIdx] || samples[samples.length - 1];
+
     let apex = samples[0];
-    let minSpeed = samples[0].speed;
-    samples.forEach(s => {
-      if (s.speed < minSpeed) {
-        minSpeed = s.speed;
-        apex = s;
-      }
-    });
+    if (apexIdx >= 0 && samples[apexIdx]) {
+      apex = samples[apexIdx];
+    } else {
+      let minSpeed = samples[0].speed;
+      samples.forEach(s => {
+        if (s.speed < minSpeed) {
+          minSpeed = s.speed;
+          apex = s;
+        }
+      });
+    }
 
     let undCount = 0, oveCount = 0, spinCount = 0, lockCount = 0;
     let maxUnd = 0, maxOve = 0, maxSpin = 0, maxLock = 0;
@@ -597,7 +623,7 @@ function getCornerPromptCompareAnalysis(lapA: TelemetryLap, cA: CornerRating, la
   const pB = getPoints(lapB, cB);
   const formatGear = (g: number) => g === -1 ? "R" : g === 0 ? "N" : g.toString();
 
-  detail += `  [Volta A (Principal)] Nota ${cA.grade} | V.Mínima: ${Math.round(cA.minSpeedKmh)} km/h | Ideal: ${Math.round(cA.targetSpeedKmh)} km/h | Trail: ${cA.trailScore}% | Grip: ${cA.gripUtilization}% | Ápice: ${cA.apexTiming}\n`;
+  detail += `  [Volta A (Principal)] Nota ${cA.grade} | V.Mínima: ${Math.round(cA.minSpeedKmh)} km/h | Ideal: ${Math.round(cA.targetSpeedKmh)} km/h | Trail: ${cA.trailScore}% | Grip: ${cA.gripUtilization}%${cA.exitScore !== undefined ? ` | Saída/Acel: ${cA.exitScore}%` : ''} | Ápice: ${cA.apexTiming}\n`;
   if (pA) {
     detail += `    * Entrada: Vel: ${Math.round(pA.entry.speed)} km/h, Marcha: ${formatGear(pA.entry.gear)}, Acel: ${Math.round(pA.entry.thr * 100)}%, Freio: ${Math.round(pA.entry.brk * 100)}%, Esterço: ${Math.round(pA.entry.steer * 100)}%, G-Lat: ${pA.entry.gLat.toFixed(2)}G, G-Long: ${pA.entry.gLong.toFixed(2)}G\n`;
     detail += `    * Ápice:   Vel: ${Math.round(pA.apex.speed)} km/h, Marcha: ${formatGear(pA.apex.gear)}, Acel: ${Math.round(pA.apex.thr * 100)}%, Freio: ${Math.round(pA.apex.brk * 100)}%, Esterço: ${Math.round(pA.apex.steer * 100)}%, G-Lat: ${pA.apex.gLat.toFixed(2)}G, G-Long: ${pA.apex.gLong.toFixed(2)}G\n`;
@@ -612,7 +638,7 @@ function getCornerPromptCompareAnalysis(lapA: TelemetryLap, cA: CornerRating, la
     }
   }
 
-  detail += `  [Volta B (Referência)] Nota ${cB.grade} | V.Mínima: ${Math.round(cB.minSpeedKmh)} km/h | Ideal: ${Math.round(cB.targetSpeedKmh)} km/h | Trail: ${cB.trailScore}% | Grip: ${cB.gripUtilization}% | Ápice: ${cB.apexTiming}\n`;
+  detail += `  [Volta B (Referência)] Nota ${cB.grade} | V.Mínima: ${Math.round(cB.minSpeedKmh)} km/h | Ideal: ${Math.round(cB.targetSpeedKmh)} km/h | Trail: ${cB.trailScore}% | Grip: ${cB.gripUtilization}%${cB.exitScore !== undefined ? ` | Saída/Acel: ${cB.exitScore}%` : ''} | Ápice: ${cB.apexTiming}\n`;
   if (pB) {
     detail += `    * Entrada: Vel: ${Math.round(pB.entry.speed)} km/h, Marcha: ${formatGear(pB.entry.gear)}, Acel: ${Math.round(pB.entry.thr * 100)}%, Freio: ${Math.round(pB.entry.brk * 100)}%, Esterço: ${Math.round(pB.entry.steer * 100)}%, G-Lat: ${pB.entry.gLat.toFixed(2)}G, G-Long: ${pB.entry.gLong.toFixed(2)}G\n`;
     detail += `    * Ápice:   Vel: ${Math.round(pB.apex.speed)} km/h, Marcha: ${formatGear(pB.apex.gear)}, Acel: ${Math.round(pB.apex.thr * 100)}%, Freio: ${Math.round(pB.apex.brk * 100)}%, Esterço: ${Math.round(pB.apex.steer * 100)}%, G-Lat: ${pB.apex.gLat.toFixed(2)}G, G-Long: ${pB.apex.gLong.toFixed(2)}G\n`;
@@ -1442,6 +1468,62 @@ function drawTrackMap(): void {
       ctx.fill();
       ctx.stroke();
     }
+  }
+
+  // 6. Draw visual Entry, Apex, and Exit markers for the selected corner
+  if (selectedCornerIdx !== null && activeLapA.corners[selectedCornerIdx]) {
+    const c = activeLapA.corners[selectedCornerIdx];
+    const samples = activeLapA.samples;
+
+    const entryIdx = c.entryIndex !== undefined ? c.entryIndex : c.startIndex;
+    const apexIdx = c.apexIndex !== undefined ? c.apexIndex : -1;
+    const exitIdx = c.exitIndex !== undefined ? c.exitIndex : c.endIndex;
+
+    // Settle apex dynamically if undefined (fallback)
+    let finalApexIdx = apexIdx;
+    if (finalApexIdx === -1 && c.startIndex !== undefined && c.endIndex !== undefined) {
+      let minSpeed = Infinity;
+      for (let i = c.startIndex; i <= c.endIndex; i++) {
+        if (samples[i] && samples[i].speed < minSpeed) {
+          minSpeed = samples[i].speed;
+          finalApexIdx = i;
+        }
+      }
+    }
+
+    const drawMarker = (sampleIdx: number | undefined, color: string, label: string) => {
+      if (sampleIdx === undefined || !samples[sampleIdx]) return;
+      const s = samples[sampleIdx];
+      const x = s.x * mapZoom + mapOffsetX;
+      const y = s.z * mapZoom + mapOffsetY;
+
+      // Outer halo
+      ctx.fillStyle = color + "40"; // 25% opacity
+      ctx.beginPath();
+      ctx.arc(x, y, 9, 0, 2 * Math.PI);
+      ctx.fill();
+
+      // Center dot
+      ctx.fillStyle = color;
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(x, y, 4.5, 0, 2 * Math.PI);
+      ctx.fill();
+      ctx.stroke();
+
+      // Label text
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 10px Outfit, sans-serif";
+      ctx.shadowColor = "rgba(0, 0, 0, 0.8)";
+      ctx.shadowBlur = 4;
+      ctx.fillText(label, x + 8, y + 3);
+      ctx.shadowBlur = 0; // reset
+    };
+
+    if (entryIdx !== undefined) drawMarker(entryIdx, "#10b981", "Entrada"); // Green
+    if (finalApexIdx !== -1) drawMarker(finalApexIdx, "#f59e0b", "Ápice"); // Yellow/Gold
+    if (exitIdx !== undefined) drawMarker(exitIdx, "#3b82f6", "Saída"); // Blue
   }
 }
 

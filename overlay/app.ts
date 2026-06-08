@@ -229,6 +229,7 @@ function startMockSimulation(): void {
         minSpeedKmh: 84,
         targetSpeedKmh: 80,
         trailScore: 88,
+        exitScore: 90,
         apexTiming: "Perfeito",
         gripUtilization: 82
       };

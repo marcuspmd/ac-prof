@@ -66,6 +66,48 @@ local function getSpeedRelativeColor(deltaKmh)
   end
 end
 
+-- Helper function to get world position of a spline point
+local function getSplineWorldPos(idx, detailCount)
+  if aiLoader.points[idx] and aiLoader.points[idx].worldPos then
+    return aiLoader.points[idx].worldPos
+  else
+    local p = (idx - 1) / detailCount
+    return ac.trackProgressToWorldCoordinate(p, true)
+  end
+end
+
+-- Helper function to calculate track curvature at a given spline index
+local function getCurvatureAt(idx, detailCount)
+  local prevIdx = ((idx - 2) % detailCount) + 1
+  local currIdx = idx
+  local nextIdx = (idx % detailCount) + 1
+
+  local pos1 = getSplineWorldPos(prevIdx, detailCount)
+  local pos2 = getSplineWorldPos(currIdx, detailCount)
+  local pos3 = getSplineWorldPos(nextIdx, detailCount)
+
+  if not pos1 or not pos2 or not pos3 then return 0 end
+
+  -- Calculate tangent vectors in XZ plane (ignoring vertical changes)
+  local t1x, t1z = pos2.x - pos1.x, pos2.z - pos1.z
+  local t2x, t2z = pos3.x - pos2.x, pos3.z - pos2.z
+
+  local len1 = math.sqrt(t1x * t1x + t1z * t1z)
+  local len2 = math.sqrt(t2x * t2x + t2z * t2z)
+
+  if len1 < 0.001 or len2 < 0.001 then return 0 end
+
+  local nt1x, nt1z = t1x / len1, t1z / len1
+  local nt2x, nt2z = t2x / len2, t2z / len2
+
+  -- Curvature = dt / ds
+  local dtx = nt2x - nt1x
+  local dtz = nt2z - nt1z
+  local dtLen = math.sqrt(dtx * dtx + dtz * dtz)
+
+  return dtLen / len1
+end
+
 -- Helper function to pre-scan track spline for corners on session startup
 -- Uses the AI speed profile and braking/throttle triggers to detect real apexes
 local function preScanTrackCorners(sim)
@@ -151,9 +193,24 @@ local function preScanTrackCorners(sim)
   -- Proximity merge (< 15 meters)
   for _, current in ipairs(tempApexes) do
     if #allTrackCorners == 0 then
+      local apexIdx = current.idx
+      local entryIdx = apexIdx
+      local minCurvature = 0.004
+      local maxSearchBack = math.floor(200 / mPerPoint)
+      for w = -1, -maxSearchBack, -1 do
+        local checkIdx = ((apexIdx + w - 1) % detailCount) + 1
+        local c = getCurvatureAt(checkIdx, detailCount)
+        if c < minCurvature then
+          entryIdx = checkIdx
+          break
+        end
+      end
+      local entryProgress = (entryIdx - 1) / detailCount
+
       table.insert(allTrackCorners, {
         idx = current.idx,
         apexProgress = current.progress,
+        entryProgress = entryProgress,
         vTargetAI = current.speedKmh / 3.6,
         speedKmh = current.speedKmh
       })
@@ -171,11 +228,41 @@ local function preScanTrackCorners(sim)
           last.apexProgress = current.progress
           last.vTargetAI = current.speedKmh / 3.6
           last.speedKmh = current.speedKmh
+          
+          -- Recalculate entry progress for merged corner
+          local apexIdx = current.idx
+          local entryIdx = apexIdx
+          local minCurvature = 0.004
+          local maxSearchBack = math.floor(200 / mPerPoint)
+          for w = -1, -maxSearchBack, -1 do
+            local checkIdx = ((apexIdx + w - 1) % detailCount) + 1
+            local c = getCurvatureAt(checkIdx, detailCount)
+            if c < minCurvature then
+              entryIdx = checkIdx
+              break
+            end
+          end
+          last.entryProgress = (entryIdx - 1) / detailCount
         end
       else
+        local apexIdx = current.idx
+        local entryIdx = apexIdx
+        local minCurvature = 0.004
+        local maxSearchBack = math.floor(200 / mPerPoint)
+        for w = -1, -maxSearchBack, -1 do
+          local checkIdx = ((apexIdx + w - 1) % detailCount) + 1
+          local c = getCurvatureAt(checkIdx, detailCount)
+          if c < minCurvature then
+            entryIdx = checkIdx
+            break
+          end
+        end
+        local entryProgress = (entryIdx - 1) / detailCount
+
         table.insert(allTrackCorners, {
           idx = current.idx,
           apexProgress = current.progress,
+          entryProgress = entryProgress,
           vTargetAI = current.speedKmh / 3.6,
           speedKmh = current.speedKmh
         })
@@ -215,10 +302,23 @@ function M.recalculateSafeSpeedProfile(car, roadGrip)
     local brakingFactors = physics.getPhysicsFactors(car, vTargetCorner)
     local targetDecel = maxDecelG * 9.81 * 0.80 * math.max(0.5, roadGrip) * brakingFactors.aeroGripMultiplier * brakingFactors.brakeEfficiency
     
+    -- Calculate Entry-to-Apex distance
+    local diffEntryToApex = turn.apexProgress - (turn.entryProgress or turn.apexProgress)
+    if diffEntryToApex > 0.5 then diffEntryToApex = diffEntryToApex - 1.0
+    elseif diffEntryToApex < -0.5 then diffEntryToApex = diffEntryToApex + 1.0 end
+    local distEntryToApex = math.abs(diffEntryToApex * trackLength)
+    
+    -- Target speed at Corner Entry: trail deceleration is lower (~40% of straight-line deceleration)
+    local trailDecel = targetDecel * 0.40
+    local vTargetEntry = math.sqrt(vTargetCorner * vTargetCorner + 2 * trailDecel * distEntryToApex)
+    
     table.insert(activeCorners, {
       turn = turn,
-      vTarget = vTargetCorner,
-      targetDecel = targetDecel
+      vTargetApex = vTargetCorner,
+      vTargetEntry = vTargetEntry,
+      targetDecelFull = targetDecel,
+      targetDecelTrail = trailDecel,
+      distEntryToApex = distEntryToApex
     })
   end
 
@@ -230,19 +330,32 @@ function M.recalculateSafeSpeedProfile(car, roadGrip)
     local minVSafe = 999.0 -- infinity fallback
     
     for _, acCorner in ipairs(activeCorners) do
-      local diff = acCorner.turn.apexProgress - p
-      if diff > 0.5 then diff = diff - 1.0
-      elseif diff < -0.5 then diff = diff + 1.0 end
-      local distToApex = diff * trackLength
+      -- Distance from current point to Entry
+      local diffEntry = (acCorner.turn.entryProgress or acCorner.turn.apexProgress) - p
+      if diffEntry > 0.5 then diffEntry = diffEntry - 1.0
+      elseif diffEntry < -0.5 then diffEntry = diffEntry + 1.0 end
+      local distToEntry = diffEntry * trackLength
+      
+      -- Distance from current point to Apex
+      local diffApex = acCorner.turn.apexProgress - p
+      if diffApex > 0.5 then diffApex = diffApex - 1.0
+      elseif diffApex < -0.5 then diffApex = diffApex + 1.0 end
+      local distToApex = diffApex * trackLength
       
       if distToApex >= 0 then
-        local vTargetCorner = acCorner.vTarget
-        local targetDecel = acCorner.targetDecel
+        local vSafeCorner = 999.0
         
-        -- Solve quadratic equation for physical deceleration + reaction time
-        local B = targetDecel * reactionTime
-        local C = -(vTargetCorner * vTargetCorner + (2 * targetDecel * distToApex) / brakingMargin)
-        local vSafeCorner = -B + math.sqrt(B * B - C)
+        if distToEntry >= 0 then
+          -- Before Entry: full braking deceleration to vTargetEntry at the Entry point
+          local B = acCorner.targetDecelFull * reactionTime
+          local C = -(acCorner.vTargetEntry * acCorner.vTargetEntry + (2 * acCorner.targetDecelFull * distToEntry) / brakingMargin)
+          vSafeCorner = -B + math.sqrt(math.max(0, B * B - C))
+        else
+          -- Past Entry, before Apex: trail braking deceleration to vTargetApex at the Apex
+          local B = acCorner.targetDecelTrail * reactionTime
+          local C = -(acCorner.vTargetApex * acCorner.vTargetApex + (2 * acCorner.targetDecelTrail * distToApex) / brakingMargin)
+          vSafeCorner = -B + math.sqrt(math.max(0, B * B - C))
+        end
         
         if vSafeCorner < minVSafe then
           minVSafe = vSafeCorner

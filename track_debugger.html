@@ -605,10 +605,63 @@
             // Sort by index
             tempApexes.sort((a, b) => a.idx - b.idx);
 
+            // Helper function to calculate track curvature at a given spline index
+            function getCurvatureAt(idx, detailCount) {
+                const prevIdx = (idx - 1 + detailCount) % detailCount;
+                const currIdx = idx;
+                const nextIdx = (idx + 1) % detailCount;
+
+                const pos1 = track.points[prevIdx];
+                const pos2 = track.points[currIdx];
+                const pos3 = track.points[nextIdx];
+
+                if (!pos1 || !pos2 || !pos3) return 0;
+
+                // Calculate tangent vectors in XZ plane (ignoring vertical changes)
+                const t1x = pos2.x - pos1.x;
+                const t1z = pos2.z - pos1.z;
+                const t2x = pos3.x - pos2.x;
+                const t2z = pos3.z - pos2.z;
+
+                const len1 = Math.sqrt(t1x * t1x + t1z * t1z);
+                const len2 = Math.sqrt(t2x * t2x + t2z * t2z);
+
+                if (len1 < 0.001 || len2 < 0.001) return 0;
+
+                const nt1x = t1x / len1;
+                const nt1z = t1z / len1;
+                const nt2x = t2x / len2;
+                const nt2z = t2z / len2;
+
+                // Curvature = dt / ds
+                const dtx = nt2x - nt1x;
+                const dtz = nt2z - nt1z;
+                const dtLen = Math.sqrt(dtx * dtx + dtz * dtz);
+
+                return dtLen / len1;
+            }
+
+            function getEntryIndex(apexIdx) {
+                let entryIdx = apexIdx;
+                const minCurvature = 0.004;
+                const maxSearchBack = Math.floor(200 / mPerPoint);
+                for (let w = -1; w >= -maxSearchBack; w--) {
+                    const checkIdx = (apexIdx + w + detailCount) % detailCount;
+                    const c = getCurvatureAt(checkIdx, detailCount);
+                    if (c < minCurvature) {
+                        entryIdx = checkIdx;
+                        break;
+                    }
+                }
+                return entryIdx;
+            }
+
             // Proximity merge (< 15 meters)
             const allApexes = [];
             tempApexes.forEach(current => {
                 if (allApexes.length === 0) {
+                    const entryIdx = getEntryIndex(current.idx);
+                    current.entryProgress = entryIdx / detailCount;
                     allApexes.push(current);
                 } else {
                     const last = allApexes[allApexes.length - 1];
@@ -625,8 +678,13 @@
                             last.speedKmh = current.speedKmh;
                             last.x = current.x;
                             last.z = current.z;
+                            
+                            const entryIdx = getEntryIndex(last.idx);
+                            last.entryProgress = entryIdx / detailCount;
                         }
                     } else {
+                        const entryIdx = getEntryIndex(current.idx);
+                        current.entryProgress = entryIdx / detailCount;
                         allApexes.push(current);
                     }
                 }
@@ -651,9 +709,26 @@
 
                 if (distToApex > -20 && distToApex < 600) {
                     const vTargetCorner = apex.speedKmh * gripRatio * gripSpeedScale * cornerSpeedBias / 3.6;
+                    const targetDecel = maxDecelG * 9.81 * 0.80 * Math.max(0.5, roadGrip);
+                    
+                    // Calculate Entry-to-Apex distance
+                    let diffEntryToApex = apex.progress - (apex.entryProgress !== undefined ? apex.entryProgress : apex.progress);
+                    if (diffEntryToApex > 0.5) diffEntryToApex -= 1.0;
+                    else if (diffEntryToApex < -0.5) diffEntryToApex += 1.0;
+                    const distEntryToApex = Math.abs(diffEntryToApex * trackLength);
+                    
+                    // Target speed at Corner Entry: trail deceleration is lower (~40% of straight-line deceleration)
+                    const trailDecel = targetDecel * 0.40;
+                    const vTargetEntry = Math.sqrt(vTargetCorner * vTargetCorner + 2 * trailDecel * distEntryToApex);
+
                     activeCorners.push({
                         apex: apex,
                         vTarget: vTargetCorner,
+                        vTargetApex: vTargetCorner,
+                        vTargetEntry: vTargetEntry,
+                        targetDecelFull: targetDecel,
+                        targetDecelTrail: trailDecel,
+                        distEntryToApex: distEntryToApex,
                         distToApex: distToApex
                     });
                 }
@@ -664,19 +739,34 @@
                 let minVSafe = 999.0;
                 
                 activeCorners.forEach(ac => {
-                    let diff = ac.apex.progress - (ptIdx / detailCount);
-                    if (diff > 0.5) diff -= 1.0;
-                    else if (diff < -0.5) diff += 1.0;
-                    const distToApex = diff * trackLength;
+                    const entryProgress = ac.apex.entryProgress !== undefined ? ac.apex.entryProgress : ac.apex.progress;
+                    
+                    // Distance from current point to Entry
+                    let diffEntry = entryProgress - (ptIdx / detailCount);
+                    if (diffEntry > 0.5) diffEntry -= 1.0;
+                    else if (diffEntry < -0.5) diffEntry += 1.0;
+                    const distToEntry = diffEntry * trackLength;
+
+                    // Distance from current point to Apex
+                    let diffApex = ac.apex.progress - (ptIdx / detailCount);
+                    if (diffApex > 0.5) diffApex -= 1.0;
+                    else if (diffApex < -0.5) diffApex += 1.0;
+                    const distToApex = diffApex * trackLength;
 
                     if (distToApex >= 0) {
-                        const vTargetCorner = ac.vTarget;
-                        const targetDecel = maxDecelG * 9.81 * 0.80 * Math.max(0.5, roadGrip);
+                        let vSafeCorner = 999.0;
                         
-                        // Solve quadratic equation for physical deceleration + reaction time (matching Lua exactly)
-                        const B = targetDecel * reactionTime;
-                        const C = -(vTargetCorner * vTargetCorner + (2 * targetDecel * distToApex) / brakingMargin);
-                        const vSafeCorner = -B + Math.sqrt(B * B - C);
+                        if (distToEntry >= 0) {
+                            // Before Entry: full braking deceleration to vTargetEntry at the Entry point
+                            const B = ac.targetDecelFull * reactionTime;
+                            const C = -(ac.vTargetEntry * ac.vTargetEntry + (2 * ac.targetDecelFull * distToEntry) / brakingMargin);
+                            vSafeCorner = -B + Math.sqrt(Math.max(0, B * B - C));
+                        } else {
+                            // Past Entry, before Apex: trail braking deceleration to vTargetApex at the Apex
+                            const B = ac.targetDecelTrail * reactionTime;
+                            const C = -(ac.vTargetApex * ac.vTargetApex + (2 * ac.targetDecelTrail * distToApex) / brakingMargin);
+                            vSafeCorner = -B + Math.sqrt(Math.max(0, B * B - C));
+                        }
 
                         if (vSafeCorner < minVSafe) {
                             minVSafe = vSafeCorner;
@@ -744,12 +834,29 @@
                 }
             }
 
-            // Draw all detected apex indicators
+            // Draw all detected entry and apex indicators
             allApexes.forEach(apex => {
+                // Draw Entry marker
+                if (apex.entryProgress !== undefined) {
+                    const entryIdx = Math.round(apex.entryProgress * detailCount) % detailCount;
+                    const entryPt = track.points[entryIdx];
+                    if (entryPt) {
+                        const screenEntryPt = transformCoordinates(entryPt.x, entryPt.z, scaleInfo);
+                        ctx.beginPath();
+                        ctx.arc(screenEntryPt.x, screenEntryPt.y, 6, 0, 2 * Math.PI);
+                        ctx.fillStyle = '#10b981'; // Green for Entry
+                        ctx.fill();
+                        ctx.lineWidth = 1.5;
+                        ctx.strokeStyle = '#000';
+                        ctx.stroke();
+                    }
+                }
+
+                // Draw Apex marker
                 const screenPt = transformCoordinates(apex.x, apex.z, scaleInfo);
                 ctx.beginPath();
                 ctx.arc(screenPt.x, screenPt.y, 8, 0, 2 * Math.PI);
-                ctx.fillStyle = '#f59e0b';
+                ctx.fillStyle = '#f59e0b'; // Gold for Apex
                 ctx.fill();
                 ctx.lineWidth = 2;
                 ctx.strokeStyle = '#000';

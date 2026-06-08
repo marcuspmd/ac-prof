@@ -15,6 +15,7 @@ let scorecardApexSpeed: HTMLElement | null = null;
 let scorecardTrailScore: HTMLElement | null = null;
 let scorecardApexTiming: HTMLElement | null = null;
 let scorecardGripUtil: HTMLElement | null = null;
+let scorecardExitScore: HTMLElement | null = null;
 
 let coachPanel: HTMLElement | null = null;
 let coachMessage: HTMLElement | null = null;
@@ -36,6 +37,7 @@ export function initUpcomingTurn(): void {
   scorecardTrailScore = document.getElementById("scorecard-trail-score");
   scorecardApexTiming = document.getElementById("scorecard-apex-timing");
   scorecardGripUtil = document.getElementById("scorecard-grip-util");
+  scorecardExitScore = document.getElementById("scorecard-exit-score");
 
   coachPanel = document.getElementById("coach-panel");
   coachMessage = document.getElementById("coach-message");
@@ -330,6 +332,15 @@ export function displayCornerScorecard(scorecard: any): void {
   scorecardTrailScore.innerText = `${Math.round(scorecard.trailScore)}%`;
   scorecardApexTiming.innerText = scorecard.apexTiming;
   scorecardGripUtil.innerText = `${Math.round(scorecard.gripUtilization)}%`;
+
+  if (scorecardExitScore) {
+    if (scorecard.exitScore !== undefined) {
+      scorecardExitScore.innerText = `${Math.round(scorecard.exitScore)}%`;
+      (scorecardExitScore.parentElement as HTMLElement).style.display = "flex";
+    } else {
+      (scorecardExitScore.parentElement as HTMLElement).style.display = "none";
+    }
+  }
 
   scorecardOverlay.classList.remove("scorecard-hidden");
 
