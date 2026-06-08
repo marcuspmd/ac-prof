@@ -41,25 +41,21 @@ local function lerpColor(c1, c2, t)
   )
 end
 
--- Map a speed delta (actual - local ideal in km/h) to a smooth color gradient
+-- Map speed delta (car.speedMs - vSafe) to a green/red intensity gradient.
+-- Intensity indicates how much the driver can push (green) or must brake (red).
 local function getSpeedRelativeColor(deltaKmh)
-  local cDarkGreen = rgbm(0, 0.4, 0, 0.6)
-  local cLightGreen = rgbm(0.2, 0.9, 0.2, 0.6)
-  local cLightYellow = rgbm(0.9, 0.9, 0.2, 0.6)
-  local cDarkYellow = rgbm(0.9, 0.6, 0, 0.6)
-  local cLightRed = rgbm(0.9, 0.2, 0.2, 0.6)
-  local cDarkRed = rgbm(0.5, 0, 0, 0.7)
+  local cDarkGreen  = rgbm(0, 0.55, 0, 0.75)
+  local cLightGreen = rgbm(0.3, 0.9, 0.3, 0.65)
+  local cLightRed   = rgbm(0.9, 0.3, 0.3, 0.65)
+  local cDarkRed    = rgbm(0.6, 0, 0, 0.8)
 
   if deltaKmh <= -10 then
     return cDarkGreen
-  elseif deltaKmh > -10 and deltaKmh <= -3 then
-    local t = (deltaKmh - (-10)) / (-3 - (-10))
+  elseif deltaKmh < 0 then
+    local t = (deltaKmh + 10) / 10
     return lerpColor(cDarkGreen, cLightGreen, t)
-  elseif deltaKmh > -3 and deltaKmh <= 0 then
-    local t = (deltaKmh - (-3)) / (0 - (-3))
-    return lerpColor(cLightYellow, cDarkYellow, t)
-  elseif deltaKmh > 0 and deltaKmh <= 12 then
-    local t = (deltaKmh - 0) / (12 - 0)
+  elseif deltaKmh <= 12 then
+    local t = deltaKmh / 12
     return lerpColor(cLightRed, cDarkRed, t)
   else
     return cDarkRed
@@ -270,7 +266,7 @@ local function preScanTrackCorners(sim)
     end
   end
   
-  isTrackScanned = true
+  isTrackScanned = (#allTrackCorners > 0)
   logger.log(string.format("[Pre-Scan] Dual Pass + Proximity Merge: Found %d corners.", #allTrackCorners))
 end
 
@@ -286,18 +282,21 @@ function M.recalculateSafeSpeedProfile(car, roadGrip)
   -- Scale corner target speeds relative to a baseline reference car of 1.3G lateral capability
   local gripRatio = math.sqrt(physics.maxObservedLatG / 1.3)
   
-  -- Combination grip speed factor
-  local physicsFactors = physics.getPhysicsFactors(car, car.speedMs)
-  local totalGrip = roadGrip * physicsFactors.tyreGrip * physicsFactors.aeroGripMultiplier
-  local gripSpeedScale = math.sqrt(math.max(0.1, totalGrip))
+  -- Tyre grip factors are speed-independent (temp, wear, dirt). Aero is computed per-corner at
+  -- the corner's own speed to avoid using the car's current speed as a proxy for all corners.
+  local tyreFactors = physics.getPhysicsFactors(car, 0)
+  local tyreGripScale = math.sqrt(math.max(0.1, roadGrip * tyreFactors.tyreGrip))
   local cornerSpeedBias = config.cornerSpeedBias or 1.0
   local brakingMargin = config.brakingMargin or 1.0
 
   -- Cache active corner targets to avoid calling physics API inside the points loop
   local activeCorners = {}
   for _, turn in ipairs(allTrackCorners) do
-    local vTargetCorner = turn.vTargetAI * gripRatio * gripSpeedScale * cornerSpeedBias
-    
+    -- Two-pass: estimate without aero first, then refine with aero at the corner's own speed
+    local vEstimate = turn.vTargetAI * gripRatio * tyreGripScale * cornerSpeedBias
+    local cornerAeroFactors = physics.getPhysicsFactors(car, vEstimate)
+    local vTargetCorner = vEstimate * math.sqrt(cornerAeroFactors.aeroGripMultiplier)
+
     -- Deceleration capability at corner speed
     local brakingFactors = physics.getPhysicsFactors(car, vTargetCorner)
     local targetDecel = maxDecelG * 9.81 * 0.80 * math.max(0.5, roadGrip) * brakingFactors.aeroGripMultiplier * brakingFactors.brakeEfficiency
@@ -435,7 +434,7 @@ function M.drawRacingLine(car, sim, nextTurnDist, nextTurnAngle, vTarget, totalB
   physics.speedMult = speedMult
   M.speedMult = speedMult
 
-  -- Check if calibration or physics factors changed enough to warrant profile recalculation
+  -- Recalculate safe speed profile when calibration or physics factors change significantly
   local currentMaxDecelG = physics.maxObservedDecelG
   if math.abs(speedMult - lastSpeedMult) > 0.01 or
      math.abs(currentMaxDecelG - lastMaxObservedDecelG) > 0.02 or
@@ -475,31 +474,20 @@ function M.drawRacingLine(car, sim, nextTurnDist, nextTurnAngle, vTarget, totalB
           local vSafePt = M.safeSpeedProfile[idx] or 999.0
           local deltaKmh = (car.speedMs - vSafePt) * 3.6
           local color = getSpeedRelativeColor(deltaKmh)
-          
-          -- Smooth gas input over a 7-point window to filter out recording noise
+
+          -- Smooth gas over a 7-point window to determine accel/coasting side-line zones
           local sumGas = 0
           local count = 0
           for w = -3, 3 do
             local wIdx = ((idx + w - 1) % detailCount) + 1
             local wPt = aiLoader.points[wIdx]
-            if wPt then
-              sumGas = sumGas + wPt.gas
-              count = count + 1
-            end
+            if wPt then sumGas = sumGas + wPt.gas; count = count + 1 end
           end
           local smoothGas = count > 0 and (sumGas / count) or pt.gas
-          
-          local inAnyBrakingZone = (deltaKmh > 0)
-          local inAnyAccelerationZone = false
-          local inAnyCoastingZone = false
-          
-          if inAnyBrakingZone then
-            -- Braking
-          elseif smoothGas > 0.05 then
-            inAnyAccelerationZone = true
-          else
-            inAnyCoastingZone = true
-          end
+
+          local inAnyBrakingZone      = (deltaKmh > 0)
+          local inAnyAccelerationZone = (smoothGas > 0.05 and not inAnyBrakingZone)
+          local inAnyCoastingZone     = (smoothGas <= 0.05 and not inAnyBrakingZone)
           
           if prevPt then
             -- Draw main racing line segment
@@ -574,29 +562,18 @@ function M.drawRacingLine(car, sim, nextTurnDist, nextTurnAngle, vTarget, totalB
           local deltaKmh = (car.speedMs - vSafePt) * 3.6
           local color = getSpeedRelativeColor(deltaKmh)
 
-          -- Smooth gas input over a 5-point window
+          -- Smooth gas over a 5-point window to determine accel/coasting side-line zones
           local sumGas = 0
           local count = 0
           for w = -2, 2 do
             local wIdx = i + w
-            if wIdx >= 1 and wIdx <= numPoints then
-              sumGas = sumGas + points[wIdx].aiGas
-              count = count + 1
-            end
+            if wIdx >= 1 and wIdx <= numPoints then sumGas = sumGas + points[wIdx].aiGas; count = count + 1 end
           end
           local smoothGas = count > 0 and (sumGas / count) or pt.aiGas
 
-          local inAnyBrakingZone = (deltaKmh > 0)
-          local inAnyAccelerationZone = false
-          local inAnyCoastingZone = false
-          
-          if inAnyBrakingZone then
-            -- Braking
-          elseif smoothGas > 0.05 then
-            inAnyAccelerationZone = true
-          else
-            inAnyCoastingZone = true
-          end
+          local inAnyBrakingZone      = (deltaKmh > 0)
+          local inAnyAccelerationZone = (smoothGas > 0.05 and not inAnyBrakingZone)
+          local inAnyCoastingZone     = (smoothGas <= 0.05 and not inAnyBrakingZone)
 
           -- Draw main racing line segment
           racingPainter:line(prevPt.worldPos, worldPos, color, 0.5)

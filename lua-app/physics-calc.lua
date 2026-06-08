@@ -175,34 +175,31 @@ function M.updateGLimits(car)
 
   local acc = safeGet(car, "acceleration", nil)
 
-  -- Calibrate lateral G-forces (slow filter to prevent curb strikes from inflating limits)
+  -- Calibrate lateral G-forces. Filter rate 0.015 converges ~84% of peak in a 2s corner at 60fps.
   local accX = acc and math.abs(acc.x) or 0
-  M.smoothedLatG = M.smoothedLatG + (accX - M.smoothedLatG) * 0.005
+  M.smoothedLatG = M.smoothedLatG + (accX - M.smoothedLatG) * 0.015
   if M.smoothedLatG > M.maxObservedLatG and M.smoothedLatG < maxLatCap then
     M.maxObservedLatG = M.smoothedLatG
   end
 
-  -- Calibrate deceleration G-forces (slow filter when braking, decays when not)
+  -- Calibrate deceleration G-forces. Hold last value between braking events so the next
+  -- corner starts from a useful baseline instead of decaying to zero on every straight.
   local accZ = acc and acc.z or 0
   local decelG = -accZ
   if car.brake > 0.5 then
-    M.smoothedDecelG = M.smoothedDecelG + (decelG - M.smoothedDecelG) * 0.005
+    M.smoothedDecelG = M.smoothedDecelG + (decelG - M.smoothedDecelG) * 0.015
     if M.smoothedDecelG > M.maxObservedDecelG and M.smoothedDecelG < maxDecelCap then
       M.maxObservedDecelG = M.smoothedDecelG
     end
-  else
-    M.smoothedDecelG = M.smoothedDecelG + (0 - M.smoothedDecelG) * 0.02
   end
 
-  -- Calibrate acceleration G-forces (slow filter when accelerating, decays when not)
+  -- Calibrate acceleration G-forces. Same hold-last-value approach.
   local accelG = accZ
   if car.gas > 0.8 then
-    M.smoothedAccelG = M.smoothedAccelG + (accelG - M.smoothedAccelG) * 0.005
+    M.smoothedAccelG = M.smoothedAccelG + (accelG - M.smoothedAccelG) * 0.015
     if M.smoothedAccelG > M.maxObservedAccelG and M.smoothedAccelG < 2.0 then
       M.maxObservedAccelG = M.smoothedAccelG
     end
-  else
-    M.smoothedAccelG = M.smoothedAccelG + (0 - M.smoothedAccelG) * 0.02
   end
 end
 
