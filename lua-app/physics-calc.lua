@@ -212,8 +212,10 @@ function M.calculateTurnPhysicsForAngle(car, angle, roadGrip, speedMs)
   -- Grip factor based on road conditions (stable)
   local gripFactor = math.sqrt(math.max(0.1, roadGrip))
   
-  -- Performance factor based on observed limits (capped at 1.8G equivalent)
-  local basePerformanceFactor = math.min(1.8, math.sqrt(M.maxObservedLatG / 1.4))
+  -- Performance factor relative to AI baseline, scaled by speed multiplier so corner targets
+  -- account for the player's car being faster overall than the AI line.
+  local speedMult = M.speedMult or 1.0
+  local basePerformanceFactor = math.min(2.5, math.sqrt(M.maxObservedLatG * speedMult / 1.4))
 
   -- Estimate target speed without downforce/tyre conditions to break circular dependency
   local estimatedTargetKmh = baseTargetKmh * gripFactor * basePerformanceFactor * config.cornerSpeedBias
@@ -231,17 +233,17 @@ function M.calculateTurnPhysicsForAngle(car, angle, roadGrip, speedMs)
   -- Braking deceleration adjusted by observed decel limit, road grip, average braking aero multiplier, and brake efficiency
   local avgBrakingSpeedMs = (speedMs + vTarget) / 2
   local brakingFactors = M.getPhysicsFactors(car, avgBrakingSpeedMs)
-  local targetDecel = M.maxObservedDecelG * 9.81 * 0.80 * math.max(0.5, roadGrip) * brakingFactors.aeroGripMultiplier * brakingFactors.brakeEfficiency
-  
+  local targetDecel = M.maxObservedDecelG * 9.81 * config.brakeIntensityFactor * math.max(0.5, roadGrip) * brakingFactors.aeroGripMultiplier * brakingFactors.brakeEfficiency
+
   local totalBrakingDistanceNeeded = 0
   if speedMs > vTarget then
     local physicalBrakingDistance = (speedMs * speedMs - vTarget * vTarget) / (2 * targetDecel)
-    local reactionDistance = speedMs * 0.3
-    
+    local reactionDistance = speedMs * 0.15 * config.reactionMargin
+
     -- Adjustment for trail braking phase (from corner entry to apex)
     -- Deceleration is lower during turn-in, so we must brake earlier.
     local trailDist = math.max(12, math.min(45, 12 + absAngle * 0.2))
-    local trailDecelRatio = 0.40 -- trail braking is ~40% of straight-line decel
+    local trailDecelRatio = config.trailBrakingFactor
     local trailAdjustment = trailDist * (1.0 - trailDecelRatio)
     
     totalBrakingDistanceNeeded = (physicalBrakingDistance + reactionDistance + trailAdjustment) * config.brakingMargin
@@ -277,10 +279,10 @@ function M.calculateTurnPhysics(car, upcomingTurn, roadGrip)
       -- Recalculate braking distance with the new (lower) target speed
       local avgBrakingSpeedMs = (car.speedMs + vTarget) / 2
       local brakingFactors = M.getPhysicsFactors(car, avgBrakingSpeedMs)
-      local targetDecel = M.maxObservedDecelG * 9.81 * 0.80 * math.max(0.5, roadGrip) * brakingFactors.aeroGripMultiplier * brakingFactors.brakeEfficiency
+      local targetDecel = M.maxObservedDecelG * 9.81 * config.brakeIntensityFactor * math.max(0.5, roadGrip) * brakingFactors.aeroGripMultiplier * brakingFactors.brakeEfficiency
       if car.speedMs > vTarget then
         local physicalBrakingDistance = (car.speedMs * car.speedMs - vTarget * vTarget) / (2 * targetDecel)
-        local reactionDistance = car.speedMs * 0.3
+        local reactionDistance = car.speedMs * 0.3 * config.reactionMargin
         totalBrakingDistanceNeeded = (physicalBrakingDistance + reactionDistance) * config.brakingMargin
       else
         totalBrakingDistanceNeeded = 0

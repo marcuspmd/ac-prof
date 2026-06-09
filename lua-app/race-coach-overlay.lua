@@ -4,6 +4,7 @@ local uiBrowser = require('ui-browser')
 local painter = require('track-painter')
 local recorder = require('telemetry-recorder')
 local config = require('config')
+local lapDelta = require('lap-delta')
 
 
 local function log(msg)
@@ -91,9 +92,16 @@ function windowSettings(dt)
     config.drawEntryApexExit = not config.drawEntryApexExit
   end
   ui.textColored("Mostra a marcação circular em 3D no ápice de cada curva.", rgbm(0.6, 0.6, 0.6, 1.0))
-  
+
   ui.offsetCursorY(6)
-  
+
+  if ui.checkbox("Mostrar Marcadores de Frenagem", config.showBrakeMarkers) then
+    config.showBrakeMarkers = not config.showBrakeMarkers
+  end
+  ui.textColored("Desenha faixa laranja no asfalto no ponto ideal de início de frenagem.", rgbm(0.6, 0.6, 0.6, 1.0))
+
+  ui.offsetCursorY(6)
+
   local opacityVal, opacityChanged = ui.slider("Opacidade do HUD", config.overlayOpacity * 100, 0, 100, "%.0f%%")
   if opacityChanged then
     config.overlayOpacity = opacityVal / 100
@@ -103,21 +111,134 @@ function windowSettings(dt)
   ui.separator()
   ui.offsetCursorY(6)
   ui.header("Ajuste Fino de Pilotagem")
-  
-  local speedVal, speedChanged = ui.slider("Ajuste de Velocidade Curva", config.cornerSpeedBias * 100, 80, 120, "%.0f%%")
+
+  local speedVal, speedChanged = ui.slider("Velocidade nas Curvas", config.cornerSpeedBias * 100, 80, 120, "%.1f%%")
   if speedChanged then
     config.cornerSpeedBias = speedVal / 100
   end
-  ui.textColored("Altera a velocidade ideal alvo nas curvas (maior = mais rápido/agressivo).", rgbm(0.6, 0.6, 0.6, 1.0))
-  
+  ui.textColored("↑ Maior → velocidade alvo sobe, carro vai mais rápido nas curvas.", rgbm(0.5, 0.8, 0.5, 1.0))
+  ui.textColored("↓ Menor → alvo mais baixo, freie antes e entre mais devagar.", rgbm(0.8, 0.5, 0.5, 1.0))
+
   ui.offsetCursorY(6)
-  
-  local brakeVal, brakeChanged = ui.slider("Margem da Zona de Frenagem", config.brakingMargin * 100, 70, 130, "%.0f%%")
+
+  local brakeVal, brakeChanged = ui.slider("Margem de Frenagem", config.brakingMargin * 100, 70, 130, "%.1f%%")
   if brakeChanged then
     config.brakingMargin = brakeVal / 100
   end
-  ui.textColored("Ajusta a distância de frenagem (menor = freia mais tarde/perigoso).", rgbm(0.6, 0.6, 0.6, 1.0))
-  
+  ui.textColored("↑ Maior → ponto de frenagem mais cedo (mais seguro, mais conservador).", rgbm(0.5, 0.8, 0.5, 1.0))
+  ui.textColored("↓ Menor → ponto mais tardio (mais agressivo, risco de chegar quente).", rgbm(0.8, 0.5, 0.5, 1.0))
+
+  ui.offsetCursorY(6)
+
+  local brakeIntVal, brakeIntChanged = ui.slider("Intensidade de Frenagem", config.brakeIntensityFactor * 100, 65, 100, "%.1f%%")
+  if brakeIntChanged then
+    config.brakeIntensityFactor = brakeIntVal / 100
+  end
+  ui.textColored("↑ Maior → sistema assume que você freia mais forte → avisa mais tarde.", rgbm(0.5, 0.8, 0.5, 1.0))
+  ui.textColored("↓ Menor → assume frenagem mais suave → avisa mais cedo para compensar.", rgbm(0.8, 0.5, 0.5, 1.0))
+
+  ui.offsetCursorY(6)
+
+  local trailVal, trailChanged = ui.slider("Trail Braking (Freio na Curva)", config.trailBrakingFactor * 100, 10, 70, "%.1f%%")
+  if trailChanged then
+    config.trailBrakingFactor = trailVal / 100
+  end
+  ui.textColored("↑ Maior → assume que você sustenta freio na entrada → ponto mais tardio.", rgbm(0.5, 0.8, 0.5, 1.0))
+  ui.textColored("↓ Menor → não usa trail brake → mais conservador, freia bem antes da curva.", rgbm(0.8, 0.5, 0.5, 1.0))
+
+  ui.offsetCursorY(6)
+
+  local reactVal, reactChanged = ui.slider("Buffer de Reação", config.reactionMargin * 100, 50, 200, "%.0f%%")
+  if reactChanged then
+    config.reactionMargin = reactVal / 100
+  end
+  ui.textColored("↑ Maior → adiciona mais espaço antes do freio para cobrir reação humana.", rgbm(0.5, 0.8, 0.5, 1.0))
+  ui.textColored("↓ Menor → aviso mais próximo e preciso, ideal para pilotos experientes.", rgbm(0.8, 0.5, 0.5, 1.0))
+
+  ui.separator()
+  ui.offsetCursorY(6)
+  ui.header("Lap Delta")
+
+  local bestMs = lapDelta.getBestLapMs()
+  if bestMs then
+    local bestMin = math.floor(bestMs / 60000)
+    local bestSec = (bestMs % 60000) / 1000
+    ui.text(string.format("Referência: %d:%06.3f", bestMin, bestSec))
+    ui.textColored("Volta carregada do cache ou gravada nesta sessão.", rgbm(0.6, 0.6, 0.6, 1.0))
+  else
+    ui.textColored("Sem referência — complete uma volta para gravar.", rgbm(0.6, 0.6, 0.6, 1.0))
+  end
+  local key = lapDelta.getSessionKey()
+  if key then
+    ui.textColored("Cache: " .. key, rgbm(0.4, 0.4, 0.4, 1.0))
+  end
+  ui.offsetCursorY(4)
+  if ui.button("Resetar Delta", vec2(-1, 0)) then
+    lapDelta.reset()
+  end
+  ui.textColored("Remove a referência desta sessão (não apaga o cache em disco).", rgbm(0.6, 0.6, 0.6, 1.0))
+
+  ui.separator()
+  ui.offsetCursorY(6)
+  ui.header("Calibração por Curva")
+
+  local corners = painter.allTrackCorners
+  local calibCount = 0
+  local totalCorners = #corners
+  for _, turn in ipairs(corners) do
+    if turn.calibratedVTarget then calibCount = calibCount + 1 end
+  end
+  if totalCorners > 0 then
+    local pct = math.floor(calibCount / totalCorners * 100)
+    ui.text(string.format("Curvas calibradas: %d/%d (%d%%)", calibCount, totalCorners, pct))
+    ui.textColored("Calibra automaticamente ao passar pelos ápices. Completa em ~3 voltas.", rgbm(0.6, 0.6, 0.6, 1.0))
+  else
+    ui.textColored("Aguardando dados da pista...", rgbm(0.6, 0.6, 0.6, 1.0))
+  end
+  ui.offsetCursorY(4)
+  if ui.button("Resetar Calibração", vec2(-1, 0)) then
+    for _, turn in ipairs(corners) do
+      turn.observedSpeeds = {}
+      turn.calibratedVTarget = nil
+      turn.apexObsCooldown = false
+    end
+    painter.safeSpeedProfile = {}
+  end
+  ui.textColored("Limpa os dados aprendidos e volta ao baseline do AI line.", rgbm(0.6, 0.6, 0.6, 1.0))
+
+  ui.separator()
+  ui.offsetCursorY(6)
+  ui.header("Consistência por Curva")
+
+  local hasAnyObs = false
+  for ci, turn in ipairs(corners) do
+    if #turn.observedSpeeds >= 3 then
+      hasAnyObs = true
+      local sum = 0
+      for _, v in ipairs(turn.observedSpeeds) do sum = sum + v * 3.6 end
+      local mean = sum / #turn.observedSpeeds
+      local varSum = 0
+      for _, v in ipairs(turn.observedSpeeds) do
+        local d = v * 3.6 - mean
+        varSum = varSum + d * d
+      end
+      local stddev = math.sqrt(varSum / #turn.observedSpeeds)
+      local cv = stddev / mean * 100
+
+      local col
+      if cv < 3 then col = rgbm(0.2, 0.9, 0.2, 1)
+      elseif cv < 6 then col = rgbm(0.9, 0.8, 0.1, 1)
+      else col = rgbm(0.9, 0.2, 0.2, 1) end
+
+      ui.textColored(string.format(
+        "C%-2d  %.0f km/h  ±%.1f  CV:%.1f%%  (n=%d)",
+        ci, mean, stddev, cv, #turn.observedSpeeds), col)
+    end
+  end
+  if not hasAnyObs then
+    ui.textColored("Nenhum dado ainda — complete pelo menos 3 passagens.", rgbm(0.5, 0.5, 0.5, 1))
+  end
+
   ui.separator()
   ui.offsetCursorY(6)
   ui.header("Gravação de Telemetria")
@@ -137,8 +258,8 @@ ui.addSettings({
   id = "RaceCoachSettingsPanel",
   icon = ui.Icons.Settings,
   size = {
-    default = vec2(350, 420),
-    min = vec2(280, 300)
+    default = vec2(360, 580),
+    min = vec2(300, 400)
   }
 }, function()
   ui.header("Geral")
@@ -154,6 +275,10 @@ ui.addSettings({
     config.drawEntryApexExit = not config.drawEntryApexExit
   end
   ui.offsetCursorY(4)
+  if ui.checkbox("Marcadores de Frenagem", config.showBrakeMarkers) then
+    config.showBrakeMarkers = not config.showBrakeMarkers
+  end
+  ui.offsetCursorY(4)
   local opacityVal, opacityChanged = ui.slider("Opacidade HUD", config.overlayOpacity * 100, 0, 100, "%.0f%%")
   if opacityChanged then
     config.overlayOpacity = opacityVal / 100
@@ -161,15 +286,73 @@ ui.addSettings({
 
   ui.separator()
   ui.header("Ajuste Fino de Pilotagem")
-  
-  local speedVal, speedChanged = ui.slider("Ajuste de Velocidade Curva", config.cornerSpeedBias * 100, 80, 120, "%.0f%%")
-  if speedChanged then
-    config.cornerSpeedBias = speedVal / 100
-  end
+
+  local speedVal2, speedChanged2 = ui.slider("Velocidade Curvas", config.cornerSpeedBias * 100, 80, 120, "%.1f%%")
+  if speedChanged2 then config.cornerSpeedBias = speedVal2 / 100 end
+  ui.textColored("↑ Maior: mais rápido nas curvas. ↓ Menor: mais conservador.", rgbm(0.6, 0.6, 0.6, 1.0))
   ui.offsetCursorY(4)
-  local brakeVal, brakeChanged = ui.slider("Margem de Frenagem", config.brakingMargin * 100, 70, 130, "%.0f%%")
-  if brakeChanged then
-    config.brakingMargin = brakeVal / 100
+
+  local brakeVal2, brakeChanged2 = ui.slider("Margem de Frenagem", config.brakingMargin * 100, 70, 130, "%.1f%%")
+  if brakeChanged2 then config.brakingMargin = brakeVal2 / 100 end
+  ui.textColored("↑ Maior: freia mais cedo. ↓ Menor: ponto mais tardio.", rgbm(0.6, 0.6, 0.6, 1.0))
+  ui.offsetCursorY(4)
+
+  local brakeIntVal2, brakeIntChanged2 = ui.slider("Intensidade Frenagem", config.brakeIntensityFactor * 100, 65, 100, "%.1f%%")
+  if brakeIntChanged2 then config.brakeIntensityFactor = brakeIntVal2 / 100 end
+  ui.textColored("↑ Maior: assume freio mais forte → avisa mais tarde.", rgbm(0.6, 0.6, 0.6, 1.0))
+  ui.offsetCursorY(4)
+
+  local trailVal2, trailChanged2 = ui.slider("Trail Braking", config.trailBrakingFactor * 100, 10, 70, "%.1f%%")
+  if trailChanged2 then config.trailBrakingFactor = trailVal2 / 100 end
+  ui.textColored("↑ Maior: sustenta freio na curva → ponto mais tardio.", rgbm(0.6, 0.6, 0.6, 1.0))
+  ui.offsetCursorY(4)
+
+  local reactVal2, reactChanged2 = ui.slider("Buffer de Reação", config.reactionMargin * 100, 50, 200, "%.0f%%")
+  if reactChanged2 then config.reactionMargin = reactVal2 / 100 end
+  ui.textColored("↑ Maior: mais espaço de segurança. ↓ Menor: aviso mais preciso.", rgbm(0.6, 0.6, 0.6, 1.0))
+
+  ui.separator()
+  ui.header("Calibração por Curva")
+
+  local corners2 = painter.allTrackCorners
+  local calibCount2 = 0
+  for _, turn in ipairs(corners2) do
+    if turn.calibratedVTarget then calibCount2 = calibCount2 + 1 end
+  end
+  ui.text(string.format("Curvas calibradas: %d/%d", calibCount2, #corners2))
+  ui.offsetCursorY(4)
+  if ui.button("Resetar Calibração", vec2(-1, 0)) then
+    for _, turn in ipairs(corners2) do
+      turn.observedSpeeds = {}
+      turn.calibratedVTarget = nil
+      turn.apexObsCooldown = false
+    end
+    painter.safeSpeedProfile = {}
+  end
+
+  ui.separator()
+  ui.header("Consistência por Curva")
+  local hasObs2 = false
+  for ci2, turn in ipairs(corners2) do
+    if #turn.observedSpeeds >= 3 then
+      hasObs2 = true
+      local s2 = 0
+      for _, v in ipairs(turn.observedSpeeds) do s2 = s2 + v * 3.6 end
+      local m2 = s2 / #turn.observedSpeeds
+      local v2 = 0
+      for _, v in ipairs(turn.observedSpeeds) do local d = v * 3.6 - m2; v2 = v2 + d * d end
+      local sd2 = math.sqrt(v2 / #turn.observedSpeeds)
+      local cv2 = sd2 / m2 * 100
+      local c2
+      if cv2 < 3 then c2 = rgbm(0.2, 0.9, 0.2, 1)
+      elseif cv2 < 6 then c2 = rgbm(0.9, 0.8, 0.1, 1)
+      else c2 = rgbm(0.9, 0.2, 0.2, 1) end
+      ui.textColored(string.format("C%-2d %.0fkm/h ±%.1f CV:%.1f%% n=%d",
+        ci2, m2, sd2, cv2, #turn.observedSpeeds), c2)
+    end
+  end
+  if not hasObs2 then
+    ui.textColored("Nenhum dado — complete 3+ passagens.", rgbm(0.5, 0.5, 0.5, 1))
   end
 
   ui.separator()
@@ -190,6 +373,9 @@ function script.update(dt)
 
   -- 1. Calibrate dynamic G limits based on vehicle state
   physics.updateGLimits(car)
+
+  -- 1b. Update lap delta tracker
+  lapDelta.update(car)
 
   -- 2. Obtain track simulation details
   local sim = ac.getSim()
@@ -227,6 +413,17 @@ function script.update(dt)
     if jsonSuccess and jsonStr then
       if browserHud then
         browserHud:execute(string.format("if (window.onCornerCompleted) window.onCornerCompleted(%s);", jsonStr))
+      end
+    end
+  end
+
+  -- 6. Fire apex result event when a corner observation produced a new comparison
+  local apexResult = painter.popApexResult()
+  if apexResult then
+    local jsonSuccess, jsonStr = pcall(JSON.stringify, apexResult)
+    if jsonSuccess and jsonStr then
+      if browserHud then
+        browserHud:execute(string.format("if (window.onApexResult) window.onApexResult(%s);", jsonStr))
       end
     end
   end

@@ -20,6 +20,11 @@ accelerationPainter.forceRecast = true
 accelerationPainter.ageFactor = 0.1
 accelerationPainter.bulgeFactor = 0.4
 
+local brakeMarkerPainter = ac.TrackPaint()
+brakeMarkerPainter.forceRecast = true
+brakeMarkerPainter.ageFactor = 0.05
+brakeMarkerPainter.bulgeFactor = 0.1
+
 local allTrackCorners = {}
 local isTrackScanned = false
 local lastTrackLength = 0
@@ -27,6 +32,8 @@ local maxObservedSpeedKmh = 0
 
 -- Cache variables for the pre-calculated safe speed profile
 M.safeSpeedProfile = {}
+M.brakeMarkers = {}         -- {progress, worldPos, perp, apexProgress}
+M.lastApexResult = nil      -- set when an apex is observed with a previous best to compare
 local lastSpeedMult = -1
 local lastMaxObservedDecelG = -1
 local lastRoadGrip = -1
@@ -208,7 +215,10 @@ local function preScanTrackCorners(sim)
         apexProgress = current.progress,
         entryProgress = entryProgress,
         vTargetAI = current.speedKmh / 3.6,
-        speedKmh = current.speedKmh
+        speedKmh = current.speedKmh,
+        observedSpeeds = {},
+        calibratedVTarget = nil,
+        apexObsCooldown = false,
       })
     else
       local last = allTrackCorners[#allTrackCorners]
@@ -260,13 +270,17 @@ local function preScanTrackCorners(sim)
           apexProgress = current.progress,
           entryProgress = entryProgress,
           vTargetAI = current.speedKmh / 3.6,
-          speedKmh = current.speedKmh
+          speedKmh = current.speedKmh,
+          observedSpeeds = {},
+          calibratedVTarget = nil,
+          lastApexObsIdx = -999,
         })
       end
     end
   end
-  
+
   isTrackScanned = (#allTrackCorners > 0)
+  M.allTrackCorners = allTrackCorners
   logger.log(string.format("[Pre-Scan] Dual Pass + Proximity Merge: Found %d corners.", #allTrackCorners))
 end
 
@@ -279,8 +293,10 @@ function M.recalculateSafeSpeedProfile(car, roadGrip)
   local maxDecelG = physics.maxObservedDecelG or 1.1
   local speedMult = M.speedMult or 1.0
   
-  -- Scale corner target speeds relative to a baseline reference car of 1.3G lateral capability
-  local gripRatio = math.sqrt(physics.maxObservedLatG / 1.3)
+  -- Scale corner target speeds. speedMult accounts for the AI being slower than the player's car:
+  -- a faster car implies the AI reference baseline is proportionally less capable laterally.
+  local speedMult = M.speedMult or 1.0
+  local gripRatio = math.min(3.0, math.sqrt(physics.maxObservedLatG * speedMult / 1.3))
   
   -- Tyre grip factors are speed-independent (temp, wear, dirt). Aero is computed per-corner at
   -- the corner's own speed to avoid using the car's current speed as a proxy for all corners.
@@ -292,10 +308,18 @@ function M.recalculateSafeSpeedProfile(car, roadGrip)
   -- Cache active corner targets to avoid calling physics API inside the points loop
   local activeCorners = {}
   for _, turn in ipairs(allTrackCorners) do
-    -- Two-pass: estimate without aero first, then refine with aero at the corner's own speed
-    local vEstimate = turn.vTargetAI * gripRatio * tyreGripScale * cornerSpeedBias
-    local cornerAeroFactors = physics.getPhysicsFactors(car, vEstimate)
-    local vTargetCorner = vEstimate * math.sqrt(cornerAeroFactors.aeroGripMultiplier)
+    local vTargetCorner
+    if turn.calibratedVTarget then
+      -- Use player's observed apex speed directly (car-specific, driver-specific)
+      local vCalib = turn.calibratedVTarget * cornerSpeedBias
+      local cornerAeroFactors = physics.getPhysicsFactors(car, vCalib)
+      vTargetCorner = vCalib * math.sqrt(cornerAeroFactors.aeroGripMultiplier)
+    else
+      -- Fallback: estimate from AI line × grip ratio (first 2-3 laps)
+      local vEstimate = turn.vTargetAI * gripRatio * tyreGripScale * cornerSpeedBias
+      local cornerAeroFactors = physics.getPhysicsFactors(car, vEstimate)
+      vTargetCorner = vEstimate * math.sqrt(cornerAeroFactors.aeroGripMultiplier)
+    end
 
     -- Deceleration capability at corner speed
     local brakingFactors = physics.getPhysicsFactors(car, vTargetCorner)
@@ -322,7 +346,7 @@ function M.recalculateSafeSpeedProfile(car, roadGrip)
   end
 
   M.safeSpeedProfile = {}
-  local reactionTime = 0.3
+  local reactionTime = 0.15
 
   for i = 1, detailCount do
     local p = (i - 1) / detailCount
@@ -367,7 +391,60 @@ function M.recalculateSafeSpeedProfile(car, roadGrip)
   lastSpeedMult = speedMult
   lastMaxObservedDecelG = maxDecelG
   lastRoadGrip = roadGrip
-  
+
+  -- Build brake markers: calculate the braking point for each corner
+  M.brakeMarkers = {}
+  for _, acCorner in ipairs(activeCorners) do
+    local entryProgress = acCorner.turn.entryProgress or acCorner.turn.apexProgress
+    local entryIdx = math.floor(entryProgress * detailCount) + 1
+
+    -- Find max approach speed (AI * speedMult) in the 60 points before entry
+    local maxApproachMs = acCorner.vTargetEntry
+    for w = 5, 60 do
+      local checkIdx = ((entryIdx - w - 1 + detailCount) % detailCount) + 1
+      local _, _, wKmh = aiLoader.getAiInputAtProgress((checkIdx - 1) / detailCount)
+      local wMs = wKmh * speedMult / 3.6
+      if wMs > maxApproachMs then maxApproachMs = wMs end
+    end
+
+    if maxApproachMs > acCorner.vTargetEntry + 2.0 then
+      local brakeDist = (maxApproachMs * maxApproachMs - acCorner.vTargetEntry * acCorner.vTargetEntry)
+                        / (2 * acCorner.targetDecelFull)
+      local reactDist = maxApproachMs * 0.15 * (config.reactionMargin or 1.0)
+      local totalDist  = (brakeDist + reactDist) * (brakingMargin or 1.0)
+      local brakingProgress = entryProgress - totalDist / trackLength
+      while brakingProgress < 0 do brakingProgress = brakingProgress + 1.0 end
+
+      local bpWorldPos = ac.trackProgressToWorldCoordinate(brakingProgress, true)
+      if bpWorldPos then
+        -- Calculate perpendicular vector at braking point
+        local perpVec = vec3(0, 0, 0)
+        if aiLoader.isPreCalculated then
+          local bpIdx = math.max(1, math.min(math.floor(brakingProgress * detailCount) + 1, detailCount))
+          if aiLoader.points[bpIdx] and aiLoader.points[bpIdx].perp then
+            perpVec = aiLoader.points[bpIdx].perp
+          end
+        end
+        if perpVec:length() < 0.001 then
+          local bpNext = ac.trackProgressToWorldCoordinate(brakingProgress + 2.0 / trackLength, true)
+          if bpNext then
+            local tang = bpNext - bpWorldPos
+            tang.y = 0
+            local len = tang:length()
+            if len > 0.001 then perpVec = vec3(-tang.z, 0, tang.x) * (1.0 / len) end
+          end
+        end
+
+        table.insert(M.brakeMarkers, {
+          progress     = brakingProgress,
+          worldPos     = bpWorldPos,
+          perp         = perpVec,
+          apexProgress = acCorner.turn.apexProgress,
+        })
+      end
+    end
+  end
+
   logger.log(string.format("[Safe Speed Profile] Recalculated for %d points. activeCorners: %d", detailCount, #activeCorners))
 end
 
@@ -447,6 +524,7 @@ function M.drawRacingLine(car, sim, nextTurnDist, nextTurnAngle, vTarget, totalB
   racingPainter:reset()
   brakingPainter:reset()
   accelerationPainter:reset()
+  brakeMarkerPainter:reset()
 
   local lookAheadDistance = math.max(400, math.min(800, car.speedMs * 10))
   local detailCount = aiLoader.detailCount
@@ -651,6 +729,98 @@ function M.drawRacingLine(car, sim, nextTurnDist, nextTurnAngle, vTarget, totalB
       end
     end
   end
+
+  -- Draw 3D braking point markers (orange stripe across track at braking point for each corner)
+  if config.showBrakeMarkers then
+    local markerColor = rgbm(1.0, 0.50, 0.0, 0.9)
+    for _, marker in ipairs(M.brakeMarkers) do
+      local diff = marker.apexProgress - (car.splinePosition % 1.0)
+      if diff > 0.5 then diff = diff - 1.0 elseif diff < -0.5 then diff = diff + 1.0 end
+      local distToCorner = diff * trackLength
+
+      if distToCorner > -30 and distToCorner < lookAheadDistance then
+        local p1 = marker.worldPos + marker.perp * 2.5
+        local p2 = marker.worldPos - marker.perp * 2.5
+        brakeMarkerPainter:line(p1, p2, markerColor, 0.40)
+        -- Second thinner line 0.5 m ahead for visibility
+        local fwd = marker.perp:cross(vec3(0, 1, 0)):normalize() * 0.5
+        brakeMarkerPainter:line(p1 + fwd, p2 + fwd, rgbm(1.0, 0.75, 0.0, 0.6), 0.20)
+      end
+    end
+  end
+
+  -- Observe apex speeds and fire apex result event
+  for ci, turn in ipairs(allTrackCorners) do
+    local diff = turn.apexProgress - (car.splinePosition % 1.0)
+    if diff > 0.5 then diff = diff - 1.0 elseif diff < -0.5 then diff = diff + 1.0 end
+    local distToApex = diff * trackLength
+
+    if distToApex < -50 then
+      turn.apexObsCooldown = false
+    end
+
+    if distToApex > -15 and distToApex < 5 and not turn.apexObsCooldown then
+      local ok, colDepth = pcall(function() return car.collisionDepth end)
+      local isControlled = (ok and colDepth and colDepth < 0.01) or (not ok)
+      local isOnTrack = true
+      if car.wheels then
+        local offCount = 0
+        for i = 0, 3 do
+          local w = car.wheels[i]
+          if w then
+            local okS, sv = pcall(function() return w.surfaceValidTrack end)
+            if okS and sv == false then offCount = offCount + 1 end
+          end
+        end
+        if offCount >= 2 then isOnTrack = false end
+      end
+      if isControlled and isOnTrack and car.speedMs > 5.5 and (car.brake or 0) < 0.5 then
+        -- Capture previous personal best before adding new sample
+        local prevBestMs = 0
+        for _, v in ipairs(turn.observedSpeeds) do
+          if v > prevBestMs then prevBestMs = v end
+        end
+
+        table.insert(turn.observedSpeeds, car.speedMs)
+        turn.apexObsCooldown = true
+        if #turn.observedSpeeds > 15 then table.remove(turn.observedSpeeds, 1) end
+
+        if #turn.observedSpeeds >= 3 then
+          local sorted = {}
+          for _, v in ipairs(turn.observedSpeeds) do table.insert(sorted, v) end
+          table.sort(sorted)
+          local p85idx = math.max(1, math.floor(#sorted * 0.85))
+          turn.calibratedVTarget = sorted[p85idx]
+          lastSpeedMult = -1
+        end
+
+        -- Fire apex result: compare to previous personal best
+        if prevBestMs > 0 then
+          local deltaKmh = (car.speedMs - prevBestMs) * 3.6
+          local targetKmh = turn.calibratedVTarget and turn.calibratedVTarget * 3.6
+                            or turn.vTargetAI * 3.6
+          M.lastApexResult = {
+            cornerIndex   = ci,
+            currentKmh    = math.floor(car.speedMs * 3.6 * 10 + 0.5) / 10,
+            bestKmh       = math.floor(prevBestMs * 3.6 * 10 + 0.5) / 10,
+            deltaKmh      = math.floor(deltaKmh * 10 + 0.5) / 10,
+            targetKmh     = math.floor(targetKmh * 10 + 0.5) / 10,
+            isPB          = (car.speedMs > prevBestMs),
+            obsCount      = #turn.observedSpeeds,
+          }
+        end
+      end
+    end
+  end
 end
+
+-- Returns and clears the last apex result (call once per frame from coordinator)
+function M.popApexResult()
+  local r = M.lastApexResult
+  M.lastApexResult = nil
+  return r
+end
+
+M.allTrackCorners = allTrackCorners
 
 return M

@@ -5,11 +5,18 @@ local config = ac.storage{
   showRacingLine = true,
   brakingMargin = 1.0,
   cornerSpeedBias = 1.0,
-  overlayOpacity = 0.75
+  overlayOpacity = 0.75,
+  brakeIntensityFactor = 0.80,
+  trailBrakingFactor = 0.40,
+  reactionMargin = 1.0,
+  showBrakeMarkers = true,
 }
 
 -- Clamp loaded values to safe UI slider ranges
 config.brakingMargin = math.min(1.3, math.max(0.7, config.brakingMargin))
 config.cornerSpeedBias = math.min(1.2, math.max(0.8, config.cornerSpeedBias))
+config.brakeIntensityFactor = math.min(1.00, math.max(0.65, config.brakeIntensityFactor))
+config.trailBrakingFactor = math.min(0.70, math.max(0.10, config.trailBrakingFactor))
+config.reactionMargin = math.min(2.00, math.max(0.50, config.reactionMargin))
 
 return config

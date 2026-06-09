@@ -508,6 +508,7 @@
   var tyreRR = null;
   var speedWidgetActual = null;
   var speedWidgetTarget = null;
+  var deltaDisplay = null;
   function initDOM() {
     speedIndicator = document.getElementById("speed-indicator");
     gearIndicator = document.getElementById("gear-indicator");
@@ -522,6 +523,7 @@
     tyreRR = document.getElementById("tyre-rr");
     speedWidgetActual = document.getElementById("speed-widget-actual");
     speedWidgetTarget = document.getElementById("speed-widget-target");
+    deltaDisplay = document.getElementById("delta-display");
     initGG();
     initTrace();
     initUpcomingTurn();
@@ -554,6 +556,34 @@
     trackPosTarget.style.left = `${Math.max(2, Math.min(98, targetLeftPct))}%`;
   }
   window.onCornerCompleted = displayCornerScorecard;
+  window.onApexResult = function(result) {
+    if (!result) return;
+    const sign = result.deltaKmh >= 0 ? "+" : "";
+    const delta = `${sign}${result.deltaKmh.toFixed(1)} km/h`;
+    const isPB = result.isPB;
+    const vs = `${result.currentKmh.toFixed(0)} / ${result.targetKmh.toFixed(0)} km/h`;
+    let msg;
+    let type;
+    if (isPB) {
+      msg = `\u2605 Melhor tempo! \xC1pice C${result.cornerIndex}: ${vs}  (${delta} vs PB)`;
+      type = "success";
+    } else if (result.deltaKmh >= 0) {
+      msg = `Bom \xE1pice C${result.cornerIndex}: ${vs}  (${delta} vs PB)`;
+      type = "success";
+    } else if (result.deltaKmh >= -5) {
+      msg = `\xC1pice C${result.cornerIndex}: ${vs}  (${delta} vs PB)`;
+      type = "neutral";
+    } else {
+      msg = `Perdeu \xE1pice C${result.cornerIndex}: ${vs}  (${delta} vs PB)`;
+      type = "warning";
+    }
+    const coachPanel2 = document.getElementById("coach-panel");
+    const coachMessage2 = document.getElementById("coach-message");
+    if (coachPanel2 && coachMessage2) {
+      coachPanel2.className = type === "success" ? "coach-success" : type === "warning" ? "coach-warning" : "coach-neutral";
+      coachMessage2.innerText = msg;
+    }
+  };
   var updateCount = 0;
   window.onTelemetryUpdate = function(data) {
     if (!data) {
@@ -606,6 +636,23 @@
     drawInputsTrace(data.throttle, data.brake, data.steer);
     updateTrackPositionWidget(data);
     checkSteeringScrub(data.speedMs, data.steer, data.tyres[0].slipAngle, data.tyres[1].slipAngle);
+    if (deltaDisplay) {
+      const delta = data.lapDelta;
+      if (delta == null || delta === void 0) {
+        deltaDisplay.className = "delta-neutral";
+        deltaDisplay.innerText = "--.---";
+      } else {
+        const sign = delta <= 0 ? "" : "+";
+        deltaDisplay.innerText = `${sign}${delta.toFixed(3)}s`;
+        if (delta <= -0.05) {
+          deltaDisplay.className = "delta-positive";
+        } else if (delta >= 0.05) {
+          deltaDisplay.className = "delta-negative";
+        } else {
+          deltaDisplay.className = "delta-neutral";
+        }
+      }
+    }
     if (speedWidgetActual || speedWidgetTarget) {
       const actualKmh = data.speedKmh;
       const dist = data.nextTurnDist;

@@ -35,5 +35,17 @@ interface TelemetryData {
   overlayOpacity?: number;
   vTargetKmh?: number;
   totalBrakingDistanceNeeded?: number;
+  lapDelta?: number | null;
+  bestLapMs?: number | null;
+}
+
+interface ApexResult {
+  cornerIndex: number;
+  currentKmh: number;
+  bestKmh: number;
+  deltaKmh: number;       // positive = faster than PB, negative = slower
+  targetKmh: number;
+  isPB: boolean;
+  obsCount: number;
 }
 

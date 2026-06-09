@@ -23,6 +23,7 @@ let tyreRL: HTMLElement | null = null;
 let tyreRR: HTMLElement | null = null;
 let speedWidgetActual: HTMLElement | null = null;
 let speedWidgetTarget: HTMLElement | null = null;
+let deltaDisplay: HTMLElement | null = null;
 
 function initDOM(): void {
   speedIndicator = document.getElementById("speed-indicator");
@@ -38,6 +39,7 @@ function initDOM(): void {
   tyreRR = document.getElementById("tyre-rr");
   speedWidgetActual = document.getElementById("speed-widget-actual");
   speedWidgetTarget = document.getElementById("speed-widget-target");
+  deltaDisplay = document.getElementById("delta-display");
 
   initGG();
   initTrace();
@@ -86,10 +88,45 @@ declare global {
   interface Window {
     onTelemetryUpdate: (data: TelemetryData) => void;
     onCornerCompleted: (scorecard: any) => void;
+    onApexResult: (result: ApexResult) => void;
   }
 }
 
 window.onCornerCompleted = displayCornerScorecard;
+
+window.onApexResult = function(result: ApexResult): void {
+  if (!result) return;
+  const sign = result.deltaKmh >= 0 ? "+" : "";
+  const delta = `${sign}${result.deltaKmh.toFixed(1)} km/h`;
+  const isPB = result.isPB;
+  const vs = `${result.currentKmh.toFixed(0)} / ${result.targetKmh.toFixed(0)} km/h`;
+
+  let msg: string;
+  let type: "success" | "warning" | "neutral";
+  if (isPB) {
+    msg = `★ Melhor tempo! Ápice C${result.cornerIndex}: ${vs}  (${delta} vs PB)`;
+    type = "success";
+  } else if (result.deltaKmh >= 0) {
+    msg = `Bom ápice C${result.cornerIndex}: ${vs}  (${delta} vs PB)`;
+    type = "success";
+  } else if (result.deltaKmh >= -5) {
+    msg = `Ápice C${result.cornerIndex}: ${vs}  (${delta} vs PB)`;
+    type = "neutral";
+  } else {
+    msg = `Perdeu ápice C${result.cornerIndex}: ${vs}  (${delta} vs PB)`;
+    type = "warning";
+  }
+
+  // Import speakFeedback via upcoming-turn module — use the coach panel directly here
+  const coachPanel = document.getElementById("coach-panel");
+  const coachMessage = document.getElementById("coach-message");
+  if (coachPanel && coachMessage) {
+    coachPanel.className = type === "success" ? "coach-success"
+                         : type === "warning"  ? "coach-warning"
+                         : "coach-neutral";
+    coachMessage.innerText = msg;
+  }
+};
 
 let updateCount = 0;
 
@@ -175,6 +212,25 @@ window.onTelemetryUpdate = function(data: TelemetryData): void {
 
   // Front tire scrub check
   checkSteeringScrub(data.speedMs, data.steer, data.tyres[0].slipAngle, data.tyres[1].slipAngle);
+
+  // Lap delta display
+  if (deltaDisplay) {
+    const delta = data.lapDelta;
+    if (delta == null || delta === undefined) {
+      deltaDisplay.className = "delta-neutral";
+      deltaDisplay.innerText = "--.---";
+    } else {
+      const sign = delta <= 0 ? "" : "+";
+      deltaDisplay.innerText = `${sign}${delta.toFixed(3)}s`;
+      if (delta <= -0.05) {
+        deltaDisplay.className = "delta-positive";
+      } else if (delta >= 0.05) {
+        deltaDisplay.className = "delta-negative";
+      } else {
+        deltaDisplay.className = "delta-neutral";
+      }
+    }
+  }
 
   // Update new speed widget
   if (speedWidgetActual || speedWidgetTarget) {

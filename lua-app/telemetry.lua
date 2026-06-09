@@ -1,5 +1,6 @@
 local physics = require('physics-calc')
 local config = require('config')
+local lapDelta = require('lap-delta')
 local M = {}
 
 
@@ -77,7 +78,9 @@ function M.getTelemetry(carIndex)
     drawEntryApexExit = config.drawEntryApexExit,
     overlayOpacity = config.overlayOpacity,
     vTargetKmh = vTargetKmh,
-    totalBrakingDistanceNeeded = totalBrakingDistanceNeeded
+    totalBrakingDistanceNeeded = totalBrakingDistanceNeeded,
+    lapDelta = lapDelta.getDelta(),
+    bestLapMs = lapDelta.getBestLapMs(),
   }
 end
 
