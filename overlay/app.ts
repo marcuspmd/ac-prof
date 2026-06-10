@@ -24,6 +24,9 @@ let tyreRR: HTMLElement | null = null;
 let speedWidgetActual: HTMLElement | null = null;
 let speedWidgetTarget: HTMLElement | null = null;
 let deltaDisplay: HTMLElement | null = null;
+let dwDelta: HTMLElement | null = null;
+let dwRef: HTMLElement | null = null;
+let dwNow: HTMLElement | null = null;
 
 function initDOM(): void {
   speedIndicator = document.getElementById("speed-indicator");
@@ -40,6 +43,9 @@ function initDOM(): void {
   speedWidgetActual = document.getElementById("speed-widget-actual");
   speedWidgetTarget = document.getElementById("speed-widget-target");
   deltaDisplay = document.getElementById("delta-display");
+  dwDelta = document.getElementById("dw-delta");
+  dwRef   = document.getElementById("dw-ref");
+  dwNow   = document.getElementById("dw-now");
 
   initGG();
   initTrace();
@@ -152,6 +158,10 @@ window.onTelemetryUpdate = function(data: TelemetryData): void {
   state.drawEntryApexExit = data.drawEntryApexExit ?? true;
   state.overlayOpacity = data.overlayOpacity ?? 0.75;
   document.documentElement.style.setProperty('--overlay-opacity', state.overlayOpacity.toString());
+  const overlayContainer = document.getElementById('overlay-container');
+  if (overlayContainer) {
+    overlayContainer.style.visibility = state.overlayOpacity < 0.02 ? 'hidden' : '';
+  }
 
   // Calibrate acceleration G max (kept local as it's not physical grip capacity)
   const currentAccelG = data.accG.z;
@@ -261,7 +271,38 @@ window.onTelemetryUpdate = function(data: TelemetryData): void {
       }
     }
   }
+
+  // Delta widget (mode-delta standalone window)
+  if (dwDelta || dwRef || dwNow) {
+    const delta = data.lapDelta;
+    if (dwDelta) {
+      if (delta == null || delta === undefined) {
+        dwDelta.className = "dw-value dw-neutral";
+        dwDelta.innerText = "--.---";
+      } else {
+        const sign = delta <= 0 ? "" : "+";
+        dwDelta.innerText = `${sign}${delta.toFixed(3)}s`;
+        dwDelta.className = delta <= -0.05 ? "dw-value dw-ahead"
+                          : delta >=  0.05 ? "dw-value dw-behind"
+                          : "dw-value dw-neutral";
+      }
+    }
+    if (dwRef) {
+      const best = data.bestLapMs;
+      dwRef.innerText = best ? formatLapMs(best) : "--:--.---";
+    }
+    if (dwNow) {
+      const now = data.lapTimeMs;
+      dwNow.innerText = (now && now > 0) ? formatLapMs(now) : "--:--.---";
+    }
+  }
 };
+
+function formatLapMs(ms: number): string {
+  const min = Math.floor(ms / 60000);
+  const sec = (ms % 60000) / 1000;
+  return `${min}:${sec.toFixed(3).padStart(6, '0')}`;
+}
 
 // Mock Simulation Engine for standard web browsers
 function startMockSimulation(): void {

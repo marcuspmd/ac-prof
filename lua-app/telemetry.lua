@@ -81,6 +81,7 @@ function M.getTelemetry(carIndex)
     totalBrakingDistanceNeeded = totalBrakingDistanceNeeded,
     lapDelta = lapDelta.getDelta(),
     bestLapMs = lapDelta.getBestLapMs(),
+    lapTimeMs = carState.lapTimeMs or 0,
   }
 end
 

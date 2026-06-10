@@ -17,6 +17,7 @@ local browserNextTurn = nil
 local browserGG = nil
 local browserColors = nil
 local browserSpeed = nil
+local browserDelta = nil
 
 -- Size trackers to prevent frame-flicker resize loops
 local trackerHud = { x = 0, y = 0 }
@@ -24,6 +25,7 @@ local trackerNextTurn = { x = 0, y = 0 }
 local trackerGG = { x = 0, y = 0 }
 local trackerColors = { x = 0, y = 0 }
 local trackerSpeed = { x = 0, y = 0 }
+local trackerDelta = { x = 0, y = 0 }
 
 -- Primary Window: HUD (Speed, Gear, Pedals, Tyres, Engineer Feedback)
 function windowMain(dt)
@@ -65,132 +67,81 @@ function windowSpeed(dt)
   uiBrowser.updateAndDraw(browserSpeed, trackerSpeed)
 end
 
--- Control Panel Window (Native ImGui Interface)
-function windowSettings(dt)
-  ui.pushFont(ui.Font.Title)
-  ui.text("Race Coach - Configurações")
-  ui.popFont()
-  
-  ui.separator()
+-- Senary Window: Lap Delta Widget
+function windowDelta(dt)
+  if not browserDelta then
+    browserDelta = uiBrowser.createBrowser("#delta", vec2(200, 95))
+  end
+  uiBrowser.updateAndDraw(browserDelta, trackerDelta)
+end
+
+-- Shared tab content functions
+local function tabGeral()
   ui.offsetCursorY(6)
-  
   if ui.checkbox("Ativar Vozes (Feedback de Áudio)", config.voiceEnabled) then
     config.voiceEnabled = not config.voiceEnabled
   end
   ui.textColored("Ativa o feedback falado em tempo real do engenheiro de pista.", rgbm(0.6, 0.6, 0.6, 1.0))
-  
   ui.offsetCursorY(6)
-  
   if ui.checkbox("Mostrar Linha Ideal na Pista", config.showRacingLine) then
     config.showRacingLine = not config.showRacingLine
   end
   ui.textColored("Desenha a linha de trajetória ideal colorida no asfalto.", rgbm(0.6, 0.6, 0.6, 1.0))
-  
   ui.offsetCursorY(6)
-  
   if ui.checkbox("Desenhar Círculo do Ápice", config.drawEntryApexExit) then
     config.drawEntryApexExit = not config.drawEntryApexExit
   end
   ui.textColored("Mostra a marcação circular em 3D no ápice de cada curva.", rgbm(0.6, 0.6, 0.6, 1.0))
-
   ui.offsetCursorY(6)
-
   if ui.checkbox("Mostrar Marcadores de Frenagem", config.showBrakeMarkers) then
     config.showBrakeMarkers = not config.showBrakeMarkers
   end
   ui.textColored("Desenha faixa laranja no asfalto no ponto ideal de início de frenagem.", rgbm(0.6, 0.6, 0.6, 1.0))
-
   ui.offsetCursorY(6)
-
   local opacityVal, opacityChanged = ui.slider("Opacidade do HUD", config.overlayOpacity * 100, 0, 100, "%.0f%%")
-  if opacityChanged then
-    config.overlayOpacity = opacityVal / 100
-  end
+  if opacityChanged then config.overlayOpacity = opacityVal / 100 end
   ui.textColored("Ajusta a opacidade de fundo dos painéis do HUD.", rgbm(0.6, 0.6, 0.6, 1.0))
-  
-  ui.separator()
-  ui.offsetCursorY(6)
-  ui.header("Ajuste Fino de Pilotagem")
+end
 
+local function tabPilotagem()
+  ui.offsetCursorY(6)
   local speedVal, speedChanged = ui.slider("Velocidade nas Curvas", config.cornerSpeedBias * 100, 80, 120, "%.1f%%")
-  if speedChanged then
-    config.cornerSpeedBias = speedVal / 100
-  end
+  if speedChanged then config.cornerSpeedBias = speedVal / 100 end
   ui.textColored("↑ Maior → velocidade alvo sobe, carro vai mais rápido nas curvas.", rgbm(0.5, 0.8, 0.5, 1.0))
   ui.textColored("↓ Menor → alvo mais baixo, freie antes e entre mais devagar.", rgbm(0.8, 0.5, 0.5, 1.0))
-
   ui.offsetCursorY(6)
-
   local brakeVal, brakeChanged = ui.slider("Margem de Frenagem", config.brakingMargin * 100, 70, 130, "%.1f%%")
-  if brakeChanged then
-    config.brakingMargin = brakeVal / 100
-  end
-  ui.textColored("↑ Maior → ponto de frenagem mais cedo (mais seguro, mais conservador).", rgbm(0.5, 0.8, 0.5, 1.0))
-  ui.textColored("↓ Menor → ponto mais tardio (mais agressivo, risco de chegar quente).", rgbm(0.8, 0.5, 0.5, 1.0))
-
+  if brakeChanged then config.brakingMargin = brakeVal / 100 end
+  ui.textColored("↑ Maior → ponto de frenagem mais cedo (mais conservador).", rgbm(0.5, 0.8, 0.5, 1.0))
+  ui.textColored("↓ Menor → ponto mais tardio (mais agressivo).", rgbm(0.8, 0.5, 0.5, 1.0))
   ui.offsetCursorY(6)
-
   local brakeIntVal, brakeIntChanged = ui.slider("Intensidade de Frenagem", config.brakeIntensityFactor * 100, 65, 100, "%.1f%%")
-  if brakeIntChanged then
-    config.brakeIntensityFactor = brakeIntVal / 100
-  end
-  ui.textColored("↑ Maior → sistema assume que você freia mais forte → avisa mais tarde.", rgbm(0.5, 0.8, 0.5, 1.0))
-  ui.textColored("↓ Menor → assume frenagem mais suave → avisa mais cedo para compensar.", rgbm(0.8, 0.5, 0.5, 1.0))
-
+  if brakeIntChanged then config.brakeIntensityFactor = brakeIntVal / 100 end
+  ui.textColored("↑ Maior → assume freio mais forte → avisa mais tarde.", rgbm(0.5, 0.8, 0.5, 1.0))
+  ui.textColored("↓ Menor → assume frenagem mais suave → avisa mais cedo.", rgbm(0.8, 0.5, 0.5, 1.0))
   ui.offsetCursorY(6)
-
   local trailVal, trailChanged = ui.slider("Trail Braking (Freio na Curva)", config.trailBrakingFactor * 100, 10, 70, "%.1f%%")
-  if trailChanged then
-    config.trailBrakingFactor = trailVal / 100
-  end
-  ui.textColored("↑ Maior → assume que você sustenta freio na entrada → ponto mais tardio.", rgbm(0.5, 0.8, 0.5, 1.0))
-  ui.textColored("↓ Menor → não usa trail brake → mais conservador, freia bem antes da curva.", rgbm(0.8, 0.5, 0.5, 1.0))
-
+  if trailChanged then config.trailBrakingFactor = trailVal / 100 end
+  ui.textColored("↑ Maior → sustenta freio na entrada → ponto mais tardio.", rgbm(0.5, 0.8, 0.5, 1.0))
+  ui.textColored("↓ Menor → sem trail brake → freia bem antes da curva.", rgbm(0.8, 0.5, 0.5, 1.0))
   ui.offsetCursorY(6)
-
   local reactVal, reactChanged = ui.slider("Buffer de Reação", config.reactionMargin * 100, 50, 200, "%.0f%%")
-  if reactChanged then
-    config.reactionMargin = reactVal / 100
-  end
-  ui.textColored("↑ Maior → adiciona mais espaço antes do freio para cobrir reação humana.", rgbm(0.5, 0.8, 0.5, 1.0))
-  ui.textColored("↓ Menor → aviso mais próximo e preciso, ideal para pilotos experientes.", rgbm(0.8, 0.5, 0.5, 1.0))
+  if reactChanged then config.reactionMargin = reactVal / 100 end
+  ui.textColored("↑ Maior → mais espaço antes do freio para cobrir reação humana.", rgbm(0.5, 0.8, 0.5, 1.0))
+  ui.textColored("↓ Menor → aviso mais próximo e preciso, para pilotos experientes.", rgbm(0.8, 0.5, 0.5, 1.0))
+end
 
-  ui.separator()
-  ui.offsetCursorY(6)
-  ui.header("Lap Delta")
-
-  local bestMs = lapDelta.getBestLapMs()
-  if bestMs then
-    local bestMin = math.floor(bestMs / 60000)
-    local bestSec = (bestMs % 60000) / 1000
-    ui.text(string.format("Referência: %d:%06.3f", bestMin, bestSec))
-    ui.textColored("Volta carregada do cache ou gravada nesta sessão.", rgbm(0.6, 0.6, 0.6, 1.0))
-  else
-    ui.textColored("Sem referência — complete uma volta para gravar.", rgbm(0.6, 0.6, 0.6, 1.0))
-  end
-  local key = lapDelta.getSessionKey()
-  if key then
-    ui.textColored("Cache: " .. key, rgbm(0.4, 0.4, 0.4, 1.0))
-  end
-  ui.offsetCursorY(4)
-  if ui.button("Resetar Delta", vec2(-1, 0)) then
-    lapDelta.reset()
-  end
-  ui.textColored("Remove a referência desta sessão (não apaga o cache em disco).", rgbm(0.6, 0.6, 0.6, 1.0))
-
-  ui.separator()
+local function tabCalibracao()
   ui.offsetCursorY(6)
   ui.header("Calibração por Curva")
-
   local corners = painter.allTrackCorners
   local calibCount = 0
-  local totalCorners = #corners
   for _, turn in ipairs(corners) do
     if turn.calibratedVTarget then calibCount = calibCount + 1 end
   end
-  if totalCorners > 0 then
-    local pct = math.floor(calibCount / totalCorners * 100)
-    ui.text(string.format("Curvas calibradas: %d/%d (%d%%)", calibCount, totalCorners, pct))
+  if #corners > 0 then
+    local pct = math.floor(calibCount / #corners * 100)
+    ui.text(string.format("Calibradas: %d/%d (%d%%)", calibCount, #corners, pct))
     ui.textColored("Calibra automaticamente ao passar pelos ápices. Completa em ~3 voltas.", rgbm(0.6, 0.6, 0.6, 1.0))
   else
     ui.textColored("Aguardando dados da pista...", rgbm(0.6, 0.6, 0.6, 1.0))
@@ -209,7 +160,6 @@ function windowSettings(dt)
   ui.separator()
   ui.offsetCursorY(6)
   ui.header("Consistência por Curva")
-
   local hasAnyObs = false
   for ci, turn in ipairs(corners) do
     if #turn.observedSpeeds >= 3 then
@@ -219,37 +169,57 @@ function windowSettings(dt)
       local mean = sum / #turn.observedSpeeds
       local varSum = 0
       for _, v in ipairs(turn.observedSpeeds) do
-        local d = v * 3.6 - mean
-        varSum = varSum + d * d
+        local d = v * 3.6 - mean; varSum = varSum + d * d
       end
       local stddev = math.sqrt(varSum / #turn.observedSpeeds)
       local cv = stddev / mean * 100
-
       local col
       if cv < 3 then col = rgbm(0.2, 0.9, 0.2, 1)
       elseif cv < 6 then col = rgbm(0.9, 0.8, 0.1, 1)
       else col = rgbm(0.9, 0.2, 0.2, 1) end
-
-      ui.textColored(string.format(
-        "C%-2d  %.0f km/h  ±%.1f  CV:%.1f%%  (n=%d)",
+      ui.textColored(string.format("C%-2d  %.0f km/h  ±%.1f  CV:%.1f%%  (n=%d)",
         ci, mean, stddev, cv, #turn.observedSpeeds), col)
     end
   end
   if not hasAnyObs then
     ui.textColored("Nenhum dado ainda — complete pelo menos 3 passagens.", rgbm(0.5, 0.5, 0.5, 1))
   end
+end
+
+local function tabDados()
+  ui.offsetCursorY(6)
+  ui.header("Lap Delta")
+  ui.textColored("O delta ao vivo está disponível como janela separada (widget Delta).", rgbm(0.6, 0.6, 0.6, 1.0))
+  local key = lapDelta.getSessionKey()
+  if key then ui.textColored("Cache: " .. key, rgbm(0.4, 0.4, 0.4, 1.0)) end
+  ui.offsetCursorY(4)
+  if ui.button("Resetar Delta", vec2(-1, 0)) then lapDelta.reset() end
+  ui.textColored("Remove a referência desta sessão (não apaga o cache em disco).", rgbm(0.6, 0.6, 0.6, 1.0))
 
   ui.separator()
   ui.offsetCursorY(6)
   ui.header("Gravação de Telemetria")
-  
   local sampleCount = recorder.getSampleCount()
   ui.text(string.format("Amostras coletadas nesta volta: %d", sampleCount))
-  
-  if ui.button("Gravar Telemetria Parcial", vec2(-1, 0)) then
-    recorder.savePartialSession()
-  end
-  ui.textColored("Grava as amostras acumuladas até o momento em um arquivo JSON na pasta 'telemetry_logs' (útil para voltas incompletas).", rgbm(0.6, 0.6, 0.6, 1.0))
+  ui.offsetCursorY(4)
+  if ui.button("Gravar Telemetria Parcial", vec2(-1, 0)) then recorder.savePartialSession() end
+  ui.textColored("Grava as amostras acumuladas em JSON na pasta 'telemetry_logs'.", rgbm(0.6, 0.6, 0.6, 1.0))
+end
+
+-- Control Panel Window (Native ImGui Interface)
+function windowSettings(dt)
+  ui.pushFont(ui.Font.Title)
+  ui.text("Race Coach - Configurações")
+  ui.popFont()
+  ui.separator()
+  ui.offsetCursorY(4)
+
+  ui.tabBar('rcoach_win_tabs', function()
+    ui.tabItem('Geral',      function() tabGeral()      end)
+    ui.tabItem('Pilotagem',  function() tabPilotagem()  end)
+    ui.tabItem('Calibração', function() tabCalibracao() end)
+    ui.tabItem('Dados',      function() tabDados()      end)
+  end)
 end
 
 -- Register settings panel in Content Manager / AC side bar settings context
@@ -258,110 +228,16 @@ ui.addSettings({
   id = "RaceCoachSettingsPanel",
   icon = ui.Icons.Settings,
   size = {
-    default = vec2(360, 580),
+    default = vec2(360, 500),
     min = vec2(300, 400)
   }
 }, function()
-  ui.header("Geral")
-  if ui.checkbox("Ativar Vozes do Engenheiro", config.voiceEnabled) then
-    config.voiceEnabled = not config.voiceEnabled
-  end
-  ui.offsetCursorY(4)
-  if ui.checkbox("Mostrar Linha Ideal", config.showRacingLine) then
-    config.showRacingLine = not config.showRacingLine
-  end
-  ui.offsetCursorY(4)
-  if ui.checkbox("Marcar Ponto de Ápice", config.drawEntryApexExit) then
-    config.drawEntryApexExit = not config.drawEntryApexExit
-  end
-  ui.offsetCursorY(4)
-  if ui.checkbox("Marcadores de Frenagem", config.showBrakeMarkers) then
-    config.showBrakeMarkers = not config.showBrakeMarkers
-  end
-  ui.offsetCursorY(4)
-  local opacityVal, opacityChanged = ui.slider("Opacidade HUD", config.overlayOpacity * 100, 0, 100, "%.0f%%")
-  if opacityChanged then
-    config.overlayOpacity = opacityVal / 100
-  end
-
-  ui.separator()
-  ui.header("Ajuste Fino de Pilotagem")
-
-  local speedVal2, speedChanged2 = ui.slider("Velocidade Curvas", config.cornerSpeedBias * 100, 80, 120, "%.1f%%")
-  if speedChanged2 then config.cornerSpeedBias = speedVal2 / 100 end
-  ui.textColored("↑ Maior: mais rápido nas curvas. ↓ Menor: mais conservador.", rgbm(0.6, 0.6, 0.6, 1.0))
-  ui.offsetCursorY(4)
-
-  local brakeVal2, brakeChanged2 = ui.slider("Margem de Frenagem", config.brakingMargin * 100, 70, 130, "%.1f%%")
-  if brakeChanged2 then config.brakingMargin = brakeVal2 / 100 end
-  ui.textColored("↑ Maior: freia mais cedo. ↓ Menor: ponto mais tardio.", rgbm(0.6, 0.6, 0.6, 1.0))
-  ui.offsetCursorY(4)
-
-  local brakeIntVal2, brakeIntChanged2 = ui.slider("Intensidade Frenagem", config.brakeIntensityFactor * 100, 65, 100, "%.1f%%")
-  if brakeIntChanged2 then config.brakeIntensityFactor = brakeIntVal2 / 100 end
-  ui.textColored("↑ Maior: assume freio mais forte → avisa mais tarde.", rgbm(0.6, 0.6, 0.6, 1.0))
-  ui.offsetCursorY(4)
-
-  local trailVal2, trailChanged2 = ui.slider("Trail Braking", config.trailBrakingFactor * 100, 10, 70, "%.1f%%")
-  if trailChanged2 then config.trailBrakingFactor = trailVal2 / 100 end
-  ui.textColored("↑ Maior: sustenta freio na curva → ponto mais tardio.", rgbm(0.6, 0.6, 0.6, 1.0))
-  ui.offsetCursorY(4)
-
-  local reactVal2, reactChanged2 = ui.slider("Buffer de Reação", config.reactionMargin * 100, 50, 200, "%.0f%%")
-  if reactChanged2 then config.reactionMargin = reactVal2 / 100 end
-  ui.textColored("↑ Maior: mais espaço de segurança. ↓ Menor: aviso mais preciso.", rgbm(0.6, 0.6, 0.6, 1.0))
-
-  ui.separator()
-  ui.header("Calibração por Curva")
-
-  local corners2 = painter.allTrackCorners
-  local calibCount2 = 0
-  for _, turn in ipairs(corners2) do
-    if turn.calibratedVTarget then calibCount2 = calibCount2 + 1 end
-  end
-  ui.text(string.format("Curvas calibradas: %d/%d", calibCount2, #corners2))
-  ui.offsetCursorY(4)
-  if ui.button("Resetar Calibração", vec2(-1, 0)) then
-    for _, turn in ipairs(corners2) do
-      turn.observedSpeeds = {}
-      turn.calibratedVTarget = nil
-      turn.apexObsCooldown = false
-    end
-    painter.safeSpeedProfile = {}
-  end
-
-  ui.separator()
-  ui.header("Consistência por Curva")
-  local hasObs2 = false
-  for ci2, turn in ipairs(corners2) do
-    if #turn.observedSpeeds >= 3 then
-      hasObs2 = true
-      local s2 = 0
-      for _, v in ipairs(turn.observedSpeeds) do s2 = s2 + v * 3.6 end
-      local m2 = s2 / #turn.observedSpeeds
-      local v2 = 0
-      for _, v in ipairs(turn.observedSpeeds) do local d = v * 3.6 - m2; v2 = v2 + d * d end
-      local sd2 = math.sqrt(v2 / #turn.observedSpeeds)
-      local cv2 = sd2 / m2 * 100
-      local c2
-      if cv2 < 3 then c2 = rgbm(0.2, 0.9, 0.2, 1)
-      elseif cv2 < 6 then c2 = rgbm(0.9, 0.8, 0.1, 1)
-      else c2 = rgbm(0.9, 0.2, 0.2, 1) end
-      ui.textColored(string.format("C%-2d %.0fkm/h ±%.1f CV:%.1f%% n=%d",
-        ci2, m2, sd2, cv2, #turn.observedSpeeds), c2)
-    end
-  end
-  if not hasObs2 then
-    ui.textColored("Nenhum dado — complete 3+ passagens.", rgbm(0.5, 0.5, 0.5, 1))
-  end
-
-  ui.separator()
-  ui.header("Telemetria")
-  local sampleCount = recorder.getSampleCount()
-  ui.text(string.format("Amostras coletadas: %d", sampleCount))
-  if ui.button("Gravar Telemetria Parcial", vec2(-1, 0)) then
-    recorder.savePartialSession()
-  end
+  ui.tabBar('rcoach_sidebar_tabs', function()
+    ui.tabItem('Geral',      function() tabGeral()      end)
+    ui.tabItem('Pilotagem',  function() tabPilotagem()  end)
+    ui.tabItem('Calibração', function() tabCalibracao() end)
+    ui.tabItem('Dados',      function() tabDados()      end)
+  end)
 end)
 
 

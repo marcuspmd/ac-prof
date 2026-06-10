@@ -509,6 +509,9 @@
   var speedWidgetActual = null;
   var speedWidgetTarget = null;
   var deltaDisplay = null;
+  var dwDelta = null;
+  var dwRef = null;
+  var dwNow = null;
   function initDOM() {
     speedIndicator = document.getElementById("speed-indicator");
     gearIndicator = document.getElementById("gear-indicator");
@@ -524,6 +527,9 @@
     speedWidgetActual = document.getElementById("speed-widget-actual");
     speedWidgetTarget = document.getElementById("speed-widget-target");
     deltaDisplay = document.getElementById("delta-display");
+    dwDelta = document.getElementById("dw-delta");
+    dwRef = document.getElementById("dw-ref");
+    dwNow = document.getElementById("dw-now");
     initGG();
     initTrace();
     initUpcomingTurn();
@@ -600,6 +606,10 @@
     state.drawEntryApexExit = data.drawEntryApexExit ?? true;
     state.overlayOpacity = data.overlayOpacity ?? 0.75;
     document.documentElement.style.setProperty("--overlay-opacity", state.overlayOpacity.toString());
+    const overlayContainer = document.getElementById("overlay-container");
+    if (overlayContainer) {
+      overlayContainer.style.visibility = state.overlayOpacity < 0.02 ? "hidden" : "";
+    }
     const currentAccelG = data.accG.z;
     if (currentAccelG > state.maxObservedAccelG && currentAccelG < 1 && data.throttle > 0.8) {
       state.maxObservedAccelG = currentAccelG;
@@ -679,7 +689,33 @@
         }
       }
     }
+    if (dwDelta || dwRef || dwNow) {
+      const delta = data.lapDelta;
+      if (dwDelta) {
+        if (delta == null || delta === void 0) {
+          dwDelta.className = "dw-value dw-neutral";
+          dwDelta.innerText = "--.---";
+        } else {
+          const sign = delta <= 0 ? "" : "+";
+          dwDelta.innerText = `${sign}${delta.toFixed(3)}s`;
+          dwDelta.className = delta <= -0.05 ? "dw-value dw-ahead" : delta >= 0.05 ? "dw-value dw-behind" : "dw-value dw-neutral";
+        }
+      }
+      if (dwRef) {
+        const best = data.bestLapMs;
+        dwRef.innerText = best ? formatLapMs(best) : "--:--.---";
+      }
+      if (dwNow) {
+        const now = data.lapTimeMs;
+        dwNow.innerText = now && now > 0 ? formatLapMs(now) : "--:--.---";
+      }
+    }
   };
+  function formatLapMs(ms) {
+    const min = Math.floor(ms / 6e4);
+    const sec = ms % 6e4 / 1e3;
+    return `${min}:${sec.toFixed(3).padStart(6, "0")}`;
+  }
   function startMockSimulation() {
     console.log("[Overlay] Iniciando Simulador de Telemetria Integrado...");
     let mockDistance = 0;

@@ -37,6 +37,7 @@ interface TelemetryData {
   totalBrakingDistanceNeeded?: number;
   lapDelta?: number | null;
   bestLapMs?: number | null;
+  lapTimeMs?: number;
 }
 
 interface ApexResult {

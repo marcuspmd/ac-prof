@@ -5,10 +5,14 @@
   box-sizing: border-box;
 }
 
+html {
+  background: transparent;
+}
+
 body {
   font-family: 'Outfit', sans-serif;
   color: #f3f4f6;
-  background-color: transparent; /* Permite fundo transparente no jogo */
+  background: transparent;
   width: 100vw;
   height: 100vh;
   margin: 0;
@@ -848,4 +852,77 @@ body.mode-speed #speed-widget {
   text-transform: uppercase;
   margin-top: 2vh;
   letter-spacing: 2px;
+}
+
+/* --- MODO DELTA (Widget autônomo de Lap Delta) --- */
+#delta-widget {
+  display: none;
+}
+
+body.mode-delta #overlay-container {
+  display: none !important;
+}
+
+body.mode-delta #delta-widget {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(17, 24, 39, var(--overlay-opacity, 0.75));
+  border-radius: 10px;
+  padding: 6px 10px;
+  gap: 2px;
+}
+
+.dw-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: #6b7280;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+
+.dw-value {
+  font-size: 28px;
+  font-family: monospace;
+  font-weight: 700;
+  line-height: 1;
+  transition: color 0.15s ease;
+}
+
+.dw-neutral { color: #9ca3af; }
+.dw-ahead   { color: #10b981; text-shadow: 0 0 10px rgba(16, 185, 129, 0.4); }
+.dw-behind  { color: #ef4444; text-shadow: 0 0 10px rgba(239, 68, 68, 0.4); }
+
+.dw-divider {
+  width: 80%;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 4px 0;
+}
+
+.dw-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  justify-content: center;
+}
+
+.dw-key {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #6b7280;
+  text-transform: uppercase;
+  min-width: 24px;
+}
+
+.dw-time {
+  font-size: 11px;
+  font-family: monospace;
+  color: #d1d5db;
 }
