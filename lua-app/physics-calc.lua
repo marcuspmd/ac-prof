@@ -112,6 +112,23 @@ function M.getPhysicsFactors(car, speedMs)
   }
 end
 
+-- Restore persisted G-limits from a previous session. Limits only ratchet upward
+-- in-session, so taking the max of saved vs current is always safe.
+function M.restoreGLimits(lat, decel, accel)
+  if type(lat) == "number" and lat > M.maxObservedLatG then
+    M.maxObservedLatG = lat
+    M.smoothedLatG = lat
+  end
+  if type(decel) == "number" and decel > M.maxObservedDecelG then
+    M.maxObservedDecelG = decel
+    M.smoothedDecelG = decel
+  end
+  if type(accel) == "number" and accel > M.maxObservedAccelG then
+    M.maxObservedAccelG = accel
+    M.smoothedAccelG = accel
+  end
+end
+
 local isLimitsInitialized = false
 function M.initializeCarLimits(car)
   if isLimitsInitialized then return end
@@ -203,6 +220,45 @@ function M.updateGLimits(car)
   end
 end
 
+-- Solve maximum corner speed from the geometric radius using available lateral grip.
+-- Aero downforce depends on speed, so fixed-point iterate (3 passes converge well within 1%).
+function M.solveCornerSpeed(car, radiusM, roadGrip)
+  if not radiusM or radiusM <= 0 then return nil end
+
+  -- Tyre temp/wear/dirt factors are speed-independent; aero is resolved in the loop
+  local tyreFactors = M.getPhysicsFactors(car, 0)
+  local latGBase = M.maxObservedLatG * math.max(0.1, roadGrip) * tyreFactors.tyreGrip
+
+  local v = math.sqrt(latGBase * 9.81 * radiusM)
+  for _ = 1, 3 do
+    local aero = M.getPhysicsFactors(car, v).aeroGripMultiplier
+    v = math.sqrt(latGBase * aero * 9.81 * radiusM)
+  end
+
+  -- 5% safety margin: the ceiling is "without spinning", not "on the absolute edge"
+  return v * 0.95
+end
+
+-- Required braking distance to slow from speedMs to vTarget (shared by the angle
+-- heuristic and by corner-based targets from the track scan)
+function M.brakingDistanceTo(car, speedMs, vTarget, roadGrip, absAngle)
+  if speedMs <= vTarget then return 0 end
+
+  local avgBrakingSpeedMs = (speedMs + vTarget) / 2
+  local brakingFactors = M.getPhysicsFactors(car, avgBrakingSpeedMs)
+  local targetDecel = M.maxObservedDecelG * 9.81 * config.brakeIntensityFactor * math.max(0.5, roadGrip) * brakingFactors.aeroGripMultiplier * brakingFactors.brakeEfficiency
+
+  local physicalBrakingDistance = (speedMs * speedMs - vTarget * vTarget) / (2 * targetDecel)
+  local reactionDistance = speedMs * 0.15 * config.reactionMargin
+
+  -- Adjustment for trail braking phase (from corner entry to apex)
+  -- Deceleration is lower during turn-in, so we must brake earlier.
+  local trailDist = math.max(12, math.min(45, 12 + (absAngle or 45) * 0.2))
+  local trailAdjustment = trailDist * (1.0 - config.trailBrakingFactor)
+
+  return (physicalBrakingDistance + reactionDistance + trailAdjustment) * config.brakingMargin
+end
+
 -- Calculate target speed and required braking distance for a specific angle
 function M.calculateTurnPhysicsForAngle(car, angle, roadGrip, speedMs)
   local absAngle = math.abs(angle)
@@ -217,8 +273,11 @@ function M.calculateTurnPhysicsForAngle(car, angle, roadGrip, speedMs)
   local speedMult = M.speedMult or 1.0
   local basePerformanceFactor = math.min(2.5, math.sqrt(M.maxObservedLatG * speedMult / 1.4))
 
+  -- Modo iniciante: margem extra na heurística (curvas sem alvo geométrico)
+  local beginnerScale = config.beginnerMode and (config.beginnerMargin or 0.90) or 1.0
+
   -- Estimate target speed without downforce/tyre conditions to break circular dependency
-  local estimatedTargetKmh = baseTargetKmh * gripFactor * basePerformanceFactor * config.cornerSpeedBias
+  local estimatedTargetKmh = baseTargetKmh * gripFactor * basePerformanceFactor * config.cornerSpeedBias * beginnerScale
   local estimatedTargetMs = estimatedTargetKmh / 3.6
 
   -- Calculate physics factors at the estimated corner speed (downforce and current tyres state)
@@ -227,27 +286,10 @@ function M.calculateTurnPhysicsForAngle(car, angle, roadGrip, speedMs)
   -- Performance factor adjusted by aero and tyre grip state
   local carPerformanceFactor = basePerformanceFactor * math.sqrt(factors.aeroGripMultiplier) * math.sqrt(factors.tyreGrip)
   
-  local vTargetKmh = baseTargetKmh * gripFactor * carPerformanceFactor * config.cornerSpeedBias
+  local vTargetKmh = baseTargetKmh * gripFactor * carPerformanceFactor * config.cornerSpeedBias * beginnerScale
   local vTarget = vTargetKmh / 3.6
 
-  -- Braking deceleration adjusted by observed decel limit, road grip, average braking aero multiplier, and brake efficiency
-  local avgBrakingSpeedMs = (speedMs + vTarget) / 2
-  local brakingFactors = M.getPhysicsFactors(car, avgBrakingSpeedMs)
-  local targetDecel = M.maxObservedDecelG * 9.81 * config.brakeIntensityFactor * math.max(0.5, roadGrip) * brakingFactors.aeroGripMultiplier * brakingFactors.brakeEfficiency
-
-  local totalBrakingDistanceNeeded = 0
-  if speedMs > vTarget then
-    local physicalBrakingDistance = (speedMs * speedMs - vTarget * vTarget) / (2 * targetDecel)
-    local reactionDistance = speedMs * 0.15 * config.reactionMargin
-
-    -- Adjustment for trail braking phase (from corner entry to apex)
-    -- Deceleration is lower during turn-in, so we must brake earlier.
-    local trailDist = math.max(12, math.min(45, 12 + absAngle * 0.2))
-    local trailDecelRatio = config.trailBrakingFactor
-    local trailAdjustment = trailDist * (1.0 - trailDecelRatio)
-    
-    totalBrakingDistanceNeeded = (physicalBrakingDistance + reactionDistance + trailAdjustment) * config.brakingMargin
-  end
+  local totalBrakingDistanceNeeded = M.brakingDistanceTo(car, speedMs, vTarget, roadGrip, absAngle)
 
   return vTarget, totalBrakingDistanceNeeded
 end

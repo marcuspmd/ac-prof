@@ -3,6 +3,11 @@ local config = require('config')
 local lapDelta = require('lap-delta')
 local M = {}
 
+-- Alvo por curva calculado pelo coordenador (script.update); quando presente,
+-- substitui a heurística de ângulo abaixo para o HUD aconselhar com o mesmo
+-- alvo da linha pintada
+M.coachVTargetMs = nil
+M.coachBrakingDist = nil
 
 -- Captura a telemetria física completa do carro do jogador usando a API do CSP
 function M.getTelemetry(carIndex)
@@ -46,9 +51,14 @@ function M.getTelemetry(carIndex)
   local vTargetKmh = 0
   local totalBrakingDistanceNeeded = 0
   if nextTurnDist > 0 then
-    local _, _, vTarget, brakingDist = physics.calculateTurnPhysics(carState, upcomingTurn, roadGrip)
-    vTargetKmh = vTarget * 3.6
-    totalBrakingDistanceNeeded = brakingDist
+    if M.coachVTargetMs and M.coachVTargetMs > 0 then
+      vTargetKmh = M.coachVTargetMs * 3.6
+      totalBrakingDistanceNeeded = M.coachBrakingDist or 0
+    else
+      local _, _, vTarget, brakingDist = physics.calculateTurnPhysics(carState, upcomingTurn, roadGrip)
+      vTargetKmh = vTarget * 3.6
+      totalBrakingDistanceNeeded = brakingDist
+    end
   end
 
   return {

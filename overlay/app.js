@@ -590,6 +590,22 @@
       coachMessage2.innerText = msg;
     }
   };
+  var coachTipTimeout = null;
+  window.onCoachTips = function(tips) {
+    if (!tips || tips.length === 0) return;
+    const tip = tips[0];
+    const coachPanel2 = document.getElementById("coach-panel");
+    const coachMessage2 = document.getElementById("coach-message");
+    if (!coachPanel2 || !coachMessage2) return;
+    const icon = tip.severity === 3 ? "\u26A0" : tip.severity === 2 ? "\u25B2" : "\u2139";
+    coachPanel2.className = tip.severity >= 2 ? "coach-warning" : "coach-neutral";
+    coachMessage2.innerText = `${icon} ${tip.text}`;
+    if (coachTipTimeout !== null) clearTimeout(coachTipTimeout);
+    coachTipTimeout = window.setTimeout(() => {
+      coachPanel2.className = "coach-neutral";
+      coachTipTimeout = null;
+    }, 8e3);
+  };
   var updateCount = 0;
   window.onTelemetryUpdate = function(data) {
     if (!data) {

@@ -48,5 +48,17 @@ interface ApexResult {
   targetKmh: number;
   isPB: boolean;
   obsCount: number;
+  physicsKmh?: number;        // physical ceiling for this corner (geometry × grip × aero)
+  gapToPhysicsKmh?: number;   // positive = time left on the table
+  confidence?: number;        // 0-1, grows with observation count
+}
+
+interface CoachTip {
+  type: string;           // corner_speed_low | corner_speed_risky | brake_early | brake_late
+                          // | trail_release_early | brake_too_deep | lockup | wheelspin
+                          // | tyre_cold | tyre_hot
+  severity: 1 | 2 | 3;    // 1 = info, 2 = improvement, 3 = warning
+  text: string;           // pre-formatted message in pt-BR
+  cornerIndex: number;
 }
 

@@ -95,6 +95,7 @@ declare global {
     onTelemetryUpdate: (data: TelemetryData) => void;
     onCornerCompleted: (scorecard: any) => void;
     onApexResult: (result: ApexResult) => void;
+    onCoachTips: (tips: CoachTip[]) => void;
   }
 }
 
@@ -132,6 +133,30 @@ window.onApexResult = function(result: ApexResult): void {
                          : "coach-neutral";
     coachMessage.innerText = msg;
   }
+};
+
+// Coaching tips fired by the Lua corner-learning module at corner exit.
+// One tip per pass, already filtered by severity and cooldown on the Lua side.
+let coachTipTimeout: number | null = null;
+
+window.onCoachTips = function(tips: CoachTip[]): void {
+  if (!tips || tips.length === 0) return;
+  const tip = tips[0];
+
+  const coachPanel = document.getElementById("coach-panel");
+  const coachMessage = document.getElementById("coach-message");
+  if (!coachPanel || !coachMessage) return;
+
+  const icon = tip.severity === 3 ? "⚠" : tip.severity === 2 ? "▲" : "ℹ";
+  coachPanel.className = tip.severity >= 2 ? "coach-warning" : "coach-neutral";
+  coachMessage.innerText = `${icon} ${tip.text}`;
+
+  // After 8s, drop the emphasis so the panel doesn't stay alarming forever
+  if (coachTipTimeout !== null) clearTimeout(coachTipTimeout);
+  coachTipTimeout = window.setTimeout(() => {
+    coachPanel.className = "coach-neutral";
+    coachTipTimeout = null;
+  }, 8000);
 };
 
 let updateCount = 0;
