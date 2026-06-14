@@ -220,8 +220,14 @@ function M.updateGLimits(car)
   end
 end
 
+-- Tyre load sensitivity exponent. In AC's sim tyre model the grip coefficient µ FALLS
+-- as vertical load rises (the LS_EXPY curve, typically 0.10–0.25), so extra load from
+-- aero downforce yields diminishing grip — never the full linear gain an arcade
+-- v=sqrt(µgR) model assumes. This is the single biggest "arcade vs sim" difference.
+local TYRE_LOAD_SENSITIVITY = 0.20
+
 -- Solve maximum corner speed from the geometric radius using available lateral grip.
--- Aero downforce depends on speed, so fixed-point iterate (3 passes converge well within 1%).
+-- Aero downforce depends on speed, so fixed-point iterate until it settles.
 function M.solveCornerSpeed(car, radiusM, roadGrip)
   if not radiusM or radiusM <= 0 then return nil end
 
@@ -230,13 +236,19 @@ function M.solveCornerSpeed(car, radiusM, roadGrip)
   local latGBase = M.maxObservedLatG * math.max(0.1, roadGrip) * tyreFactors.tyreGrip
 
   local v = math.sqrt(latGBase * 9.81 * radiusM)
-  for _ = 1, 3 do
-    local aero = M.getPhysicsFactors(car, v).aeroGripMultiplier
-    v = math.sqrt(latGBase * aero * 9.81 * radiusM)
+  for _ = 1, 4 do
+    local aeroMult = M.getPhysicsFactors(car, v).aeroGripMultiplier
+    -- Load-sensitivity-corrected aero grip: the load multiplier (1+r) only converts to
+    -- grip as (1+r)^(1-LS), so downforce gives diminishing — not linear — returns.
+    local effectiveAero = aeroMult ^ (1.0 - TYRE_LOAD_SENSITIVITY)
+    v = math.sqrt(latGBase * effectiveAero * 9.81 * radiusM)
   end
 
-  -- 5% safety margin: the ceiling is "without spinning", not "on the absolute edge"
-  return v * 0.95
+  -- Usable-grip margin (8%). The geometric radius is the drawn line's centreline and the
+  -- calibrated latG is a near-peak value; neither is sustainable to the last percent. For
+  -- a coaching line, staying on the achievable side of the limit (the car holds the corner)
+  -- matters more than shaving the final tenth.
+  return v * 0.92
 end
 
 -- Required braking distance to slow from speedMs to vTarget (shared by the angle
@@ -268,10 +280,11 @@ function M.calculateTurnPhysicsForAngle(car, angle, roadGrip, speedMs)
   -- Grip factor based on road conditions (stable)
   local gripFactor = math.sqrt(math.max(0.1, roadGrip))
   
-  -- Performance factor relative to AI baseline, scaled by speed multiplier so corner targets
-  -- account for the player's car being faster overall than the AI line.
-  local speedMult = M.speedMult or 1.0
-  local basePerformanceFactor = math.min(2.5, math.sqrt(M.maxObservedLatG * speedMult / 1.4))
+  -- Lateral performance relative to the AI baseline. Decoupled from speedMult: corner speed
+  -- scales with sqrt(grip), NOT with straight-line top speed. A car much faster on the
+  -- straights (power/drag) can have similar mechanical grip, so coupling the two asked for
+  -- impossible mid-corner speeds — the car would understeer/slide off the target line.
+  local basePerformanceFactor = math.min(2.0, math.sqrt(M.maxObservedLatG / 1.4))
 
   -- Modo iniciante: margem extra na heurística (curvas sem alvo geométrico)
   local beginnerScale = config.beginnerMode and (config.beginnerMargin or 0.90) or 1.0

@@ -192,12 +192,14 @@ local function preScanTrackCorners(sim)
       end
       
       if isMin and (maxSpeedInWindow - speedKmh) >= dropThreshold then
-        -- Verify decel trigger
+        -- Verify decel trigger: require real braking or a meaningful lift, not the
+        -- micro-throttle ripples the AI line has along straights (those were spawning
+        -- phantom "corners" that painted braking zones mid-straight).
         local hasDecelTrigger = false
         for w = -lookBackWindow, 0 do
           local checkP = (progress + w / detailCount + 1.0) % 1.0
           local wGas, wBrake, _ = aiLoader.getAiInputAtProgress(checkP)
-          if wBrake > 0.01 or wGas < 0.90 then
+          if wBrake > 0.02 or wGas < 0.80 then
             hasDecelTrigger = true
             break
           end
@@ -210,11 +212,15 @@ local function preScanTrackCorners(sim)
     end
   end
   
-  -- Pass 1: 8m search for chicanes / hairpins (requires at least 0.4 km/h speed drop)
-  runScanPass(w1, 0.4)
-  
-  -- Pass 2: 15m search for sweeping corners (requires at least 0.8 km/h speed drop)
-  runScanPass(w2, 0.8)
+  -- Detection stays sensitive on purpose: within a ±8/±15 m window even a real fast
+  -- sweeper only drops a couple km/h at the apex, so a high threshold would miss it.
+  -- Phantom "corners" on straights are removed afterwards by the geometric radius
+  -- filter (a straight has no curvature), so we don't need an aggressive drop gate here.
+  -- Pass 1: 8m search for chicanes / hairpins
+  runScanPass(w1, 0.8)
+
+  -- Pass 2: 15m search for sweeping corners
+  runScanPass(w2, 1.2)
   
   -- Collect detected apexes
   local tempApexes = {}
@@ -316,10 +322,26 @@ local function preScanTrackCorners(sim)
 
   computeCornerRadii(detailCount, mPerPoint)
 
+  -- Keep only corners with real geometry. A straight has no curvature, so
+  -- computeCornerRadii never sets radiusM (stays nil); near-zero curvature noise
+  -- clamps to the 500 m ceiling. Either way the "corner" does not actually limit
+  -- speed and must not pull the safe-speed profile below the straight speed
+  -- (that was painting braking zones in the middle of straights).
+  local RADIUS_LIMIT = 480
+  local keptCorners = {}
+  for _, turn in ipairs(allTrackCorners) do
+    if turn.radiusM and turn.radiusM < RADIUS_LIMIT then
+      table.insert(keptCorners, turn)
+    end
+  end
+  local droppedCount = #allTrackCorners - #keptCorners
+  allTrackCorners = keptCorners
+
   isTrackScanned = (#allTrackCorners > 0)
   M.allTrackCorners = allTrackCorners
   hasLoggedCornerTargets = false
-  logger.log(string.format("[Pre-Scan] Dual Pass + Proximity Merge: Found %d corners.", #allTrackCorners))
+  logger.log(string.format("[Pre-Scan] Dual Pass + Proximity Merge: %d real corners kept (%d phantom/straight discarded).",
+    #allTrackCorners, droppedCount))
 end
 
 -- Pre-calculate maximum safe speed profile for the entire track to avoid runtime lookahead lag
@@ -329,12 +351,16 @@ function M.recalculateSafeSpeedProfile(car, roadGrip)
   if detailCount <= 0 then return end
 
   local maxDecelG = physics.maxObservedDecelG or 1.1
+  -- speedMult (player vs AI top speed) only governs straight-line approach speed for brake
+  -- markers below — NOT corner targets.
   local speedMult = M.speedMult or 1.0
-  
-  -- Scale corner target speeds. speedMult accounts for the AI being slower than the player's car:
-  -- a faster car implies the AI reference baseline is proportionally less capable laterally.
-  local speedMult = M.speedMult or 1.0
-  local gripRatio = math.min(3.0, math.sqrt(physics.maxObservedLatG * speedMult / 1.3))
+
+  -- Lateral grip scaling vs the AI reference. Corner speed scales with sqrt(grip ratio),
+  -- not with straight-line top speed: a car faster on the straights can corner the same.
+  -- Coupling this to speedMult was the "arcade" inflation that demanded impossible
+  -- mid-corner speeds and made the car slide. maxObservedLatG already reflects the
+  -- player car's real measured lateral grip.
+  local gripRatio = math.min(2.0, math.sqrt(physics.maxObservedLatG / 1.3))
   
   -- Tyre grip factors are speed-independent (temp, wear, dirt). Aero is computed per-corner at
   -- the corner's own speed to avoid using the car's current speed as a proxy for all corners.
@@ -357,15 +383,20 @@ function M.recalculateSafeSpeedProfile(car, roadGrip)
       -- Modo Iniciante: ignora velocidades observadas do piloto. Teto físico
       -- limitado pela velocidade da AI line (alcançável por construção), com
       -- margem extra para quem ainda não está na linha ideal.
-      local vCeil = vPhysics
-      if turn.vTargetAI then
-        local vEstimate = turn.vTargetAI * gripRatio * tyreGripScale
-        local aiAero = physics.getPhysicsFactors(car, vEstimate)
-        local vAIScaled = vEstimate * math.sqrt(aiAero.aeroGripMultiplier)
-        if not vCeil or vAIScaled < vCeil then vCeil = vAIScaled end
-      end
-      if vCeil then
+      if vPhysics then
+        local vCeil = vPhysics
+        if turn.vTargetAI then
+          local vEstimate = turn.vTargetAI * gripRatio * tyreGripScale
+          local aiAero = physics.getPhysicsFactors(car, vEstimate)
+          local vAIScaled = vEstimate * math.sqrt(aiAero.aeroGripMultiplier)
+          if vAIScaled < vCeil then vCeil = vAIScaled end
+        end
         vTargetCorner = vCeil * (config.beginnerMargin or 0.90) * cornerSpeedBias
+      elseif turn.vTargetAI then
+        -- Sem raio geométrico (não deveria ocorrer após o filtro de pré-scan): nunca
+        -- rebaixar o alvo abaixo da velocidade da AI line, senão pintaríamos frenagem
+        -- onde a AI vai a fundo. Usa a própria velocidade da AI como teto.
+        vTargetCorner = turn.vTargetAI * cornerSpeedBias
       end
     end
     if vTargetCorner then -- modo iniciante resolvido acima
