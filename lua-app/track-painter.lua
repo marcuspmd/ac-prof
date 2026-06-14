@@ -940,4 +940,17 @@ end
 
 M.allTrackCorners = allTrackCorners
 
+-- Test seam (headless): run the corner pre-scan + safe-speed profile deterministically,
+-- without the calibration/draw frame. Mirrors what drawRacingLine sets up so the
+-- lua-app/tests harness can feed real track telemetry and inspect the result.
+-- Not used by the live overlay. Returns the safe-speed profile and the detected corners.
+function M.buildProfileForTest(car, sim, roadGrip, speedMult)
+  M.speedMult = speedMult or 1.0
+  physics.speedMult = M.speedMult
+  preScanTrackCorners(sim)
+  lastTrackLength = sim.trackLengthM
+  M.recalculateSafeSpeedProfile(car, roadGrip)
+  return M.safeSpeedProfile, allTrackCorners
+end
+
 return M
