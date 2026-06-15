@@ -17,6 +17,8 @@
     hasAnnouncedBrakingPoint: false,
     lastNextTurnDist: -1,
     lastNextTurnAngle: 0,
+    inBrakingMode: false,
+    // Schmitt trigger — evita flicker VELOCIDADE OK/FREIE
     // Configuration settings synced from Lua
     voiceEnabled: false,
     drawEntryApexExit: true,
@@ -204,6 +206,7 @@
   }
 
   // overlay/upcoming-turn.ts
+  var BRAKE_ENTER_HYSTERESIS_MS = 0.8;
   var nextTurnDisplay = null;
   var nextTurnArrow = null;
   var nextTurnDistance = null;
@@ -346,6 +349,7 @@
       if (colorsPanel) colorsPanel.className = "state-neutral";
       state.hasAnnouncedCurrentTurn = false;
       state.hasAnnouncedBrakingPoint = false;
+      state.inBrakingMode = false;
       state.lastNextTurnDist = dist;
       state.lastNextTurnAngle = angle;
       return;
@@ -355,6 +359,7 @@
     if (distIncreased || angleChanged) {
       state.hasAnnouncedCurrentTurn = false;
       state.hasAnnouncedBrakingPoint = false;
+      state.inBrakingMode = false;
     }
     state.lastNextTurnDist = dist;
     state.lastNextTurnAngle = angle;
@@ -391,12 +396,18 @@
         rearLocked = true;
       }
     }
+    if (!state.inBrakingMode && speed > vTarget + BRAKE_ENTER_HYSTERESIS_MS) {
+      state.inBrakingMode = true;
+    } else if (state.inBrakingMode && speed <= vTarget) {
+      state.inBrakingMode = false;
+    }
     if (speed > 10 && speed < vTarget - 5 && dist < 100) {
+      state.inBrakingMode = false;
       nextTurnDisplay.className = "panel-glass next-turn-safe";
       if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-safe";
       nextTurnAction.innerText = "ACELERE!";
       if (colorsPanel) colorsPanel.className = "state-safe";
-    } else if (speed <= vTarget) {
+    } else if (!state.inBrakingMode) {
       nextTurnDisplay.className = "panel-glass next-turn-safe";
       if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-safe";
       nextTurnAction.innerText = "VELOCIDADE OK";
