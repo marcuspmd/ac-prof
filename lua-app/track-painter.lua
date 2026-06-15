@@ -541,17 +541,43 @@ function M.recalculateSafeSpeedProfile(car, roadGrip)
 
   -- Build brake markers: calculate the braking point for each corner
   M.brakeMarkers = {}
-  for _, acCorner in ipairs(activeCorners) do
+  local nc = #activeCorners
+  for ci, acCorner in ipairs(activeCorners) do
     local entryProgress = acCorner.turn.entryProgress or acCorner.turn.apexProgress
     local entryIdx = math.floor(entryProgress * detailCount) + 1
 
-    -- Find max approach speed (AI * speedMult) in the 60 points before entry
+    -- Find max approach speed: scan back to the AI's last full-throttle point.
+    -- A 60-pt window puts us deep inside the AI's own braking zone on long
+    -- approaches (e.g. San Donato), so AI_speed × speedMult severely
+    -- underestimates slower cars' real approach speed. Stopping at the
+    -- gas→brake transition gives the actual flat-out approach speed.
     local maxApproachMs = acCorner.vTargetEntry
-    for w = 5, 60 do
+    local mPP = trackLength / detailCount
+    local approachScanLimit = math.min(detailCount - 1, math.floor(600.0 / mPP))
+    for w = 5, approachScanLimit do
       local checkIdx = ((entryIdx - w - 1 + detailCount) % detailCount) + 1
-      local _, _, wKmh = aiLoader.getAiInputAtProgress((checkIdx - 1) / detailCount)
+      local wGas, _, wKmh = aiLoader.getAiInputAtProgress((checkIdx - 1) / detailCount)
       local wMs = wKmh * speedMult / 3.6
       if wMs > maxApproachMs then maxApproachMs = wMs end
+      if wGas >= 0.90 and w > 10 then break end
+    end
+
+    -- Cap approach speed at what the car can physically achieve accelerating from
+    -- the previous corner's apex. Prevents the extended scan from reaching back
+    -- through a prior braking zone and inflating the brake distance for
+    -- closely-spaced corners (e.g. C14 right after C13 at Mugello).
+    if nc > 1 then
+      local prevAcCorner = activeCorners[ci > 1 and ci-1 or nc]
+      local prevApexProg = prevAcCorner.turn.apexProgress
+      local diffProg = entryProgress - prevApexProg
+      if diffProg < -0.5 then diffProg = diffProg + 1.0
+      elseif diffProg > 0.5 then diffProg = diffProg - 1.0 end
+      if diffProg > 0 then
+        local distPrevToEntry = diffProg * trackLength
+        local accelMs2 = physics.maxObservedAccelG * 9.81
+        local maxFromPrev = math.sqrt(prevAcCorner.vTargetApex^2 + 2.0 * accelMs2 * distPrevToEntry)
+        if maxFromPrev < maxApproachMs then maxApproachMs = maxFromPrev end
+      end
     end
 
     -- Prefer the braking point actually observed on the driver's good passes (F5);

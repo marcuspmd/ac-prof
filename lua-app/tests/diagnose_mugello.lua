@@ -70,23 +70,23 @@ end
 
 -- === Encontra início da frenagem real da AI para cada mínimo ===
 local function findAiBrakeStart(apexIdx)
-  -- varre para trás até achar freio ou acelerador pleno
+  -- Scan FORWARD from 600m before apex to find the last gas→brake transition.
+  -- (The old backward scan found brake=0.1 in the exit-trail phase and then
+  -- failed to find brake<0.02 within 30 steps, reporting 0–9m for everything.)
   local lookBackPts = math.min(n-1, math.floor(600/mPerPt))
-  for w = 1, lookBackPts do
+  local prevBrk = 0
+  local brkStartIdx = apexIdx  -- default: no distinct brake start found
+  for w = lookBackPts, 1, -1 do
     local i = ((apexIdx - w - 1 + n) % n) + 1
-    if brkAt(i) > 0.05 then
-      -- volta ainda mais para pegar o início
-      for w2 = 1, 30 do
-        local j = ((i - w2 - 1 + n) % n) + 1
-        if brkAt(j) < 0.02 then
-          return ((i - w2) % n) + 1, ((i-w2)*mPerPt)
-        end
-      end
-      return i, (i-1)*mPerPt
+    local bk = brkAt(i)
+    if prevBrk < 0.05 and bk >= 0.05 then
+      brkStartIdx = i  -- keep overwriting: last transition = start of final braking event
     end
-    if gasAt(i) > 0.90 then break end
+    prevBrk = bk
   end
-  return apexIdx, (apexIdx-1)*mPerPt
+  local d = apexIdx - brkStartIdx
+  if d < 0 then d = d + n end
+  return brkStartIdx, d * mPerPt
 end
 
 -- === Cabeçalho ===
