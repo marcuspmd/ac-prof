@@ -1,4 +1,6 @@
 import { AUDIO_ENABLED, FEEDBACK_COOLDOWN, WHEELBASE, MAX_STEER_RAD, SLIP_ANGLE_PEAK } from './config';
+
+const BRAKE_ENTER_HYSTERESIS_MS = 0.8; // ~3 km/h acima de vTarget para entrar em modo freio
 import { state, CornerSample } from './state';
 
 let nextTurnDisplay: HTMLElement | null = null;
@@ -185,6 +187,7 @@ export function updateUpcomingTurn(data: TelemetryData): void {
     if (colorsPanel) colorsPanel.className = "state-neutral";
     state.hasAnnouncedCurrentTurn = false;
     state.hasAnnouncedBrakingPoint = false;
+    state.inBrakingMode = false;
     state.lastNextTurnDist = dist;
     state.lastNextTurnAngle = angle;
     return;
@@ -196,6 +199,7 @@ export function updateUpcomingTurn(data: TelemetryData): void {
   if (distIncreased || angleChanged) {
     state.hasAnnouncedCurrentTurn = false;
     state.hasAnnouncedBrakingPoint = false;
+    state.inBrakingMode = false;
   }
 
   state.lastNextTurnDist = dist;
@@ -244,18 +248,27 @@ export function updateUpcomingTurn(data: TelemetryData): void {
     }
   }
 
+  // Schmitt trigger: entra em braking mode só quando speed está claramente acima do
+  // alvo (evita flicker VELOCIDADE OK ↔ FREIE por ruído de ±1–2 km/h no sensor).
+  if (!state.inBrakingMode && speed > vTarget + BRAKE_ENTER_HYSTERESIS_MS) {
+    state.inBrakingMode = true;
+  } else if (state.inBrakingMode && speed <= vTarget) {
+    state.inBrakingMode = false;
+  }
+
   if (speed > 10.0 && speed < vTarget - 5.0 && dist < 100) {
+    state.inBrakingMode = false;
     nextTurnDisplay.className = "panel-glass next-turn-safe";
     if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-safe";
     nextTurnAction.innerText = "ACELERE!";
     if (colorsPanel) colorsPanel.className = "state-safe";
-  } else if (speed <= vTarget) {
+  } else if (!state.inBrakingMode) {
     nextTurnDisplay.className = "panel-glass next-turn-safe";
     if (nextTurnStatusIndicator) nextTurnStatusIndicator.className = "status-safe";
     nextTurnAction.innerText = "VELOCIDADE OK";
     if (colorsPanel) colorsPanel.className = "state-safe";
   } else {
-    // speed > vTarget (we need to slow down)
+    // inBrakingMode = true: speed está claramente acima de vTarget
     if (dist <= totalBrakingDistanceNeeded + 12) {
       // Braking zone
       if (frontLocked) {

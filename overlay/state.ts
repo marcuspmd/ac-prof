@@ -27,6 +27,7 @@ export const state = {
   hasAnnouncedBrakingPoint: false,
   lastNextTurnDist: -1,
   lastNextTurnAngle: 0,
+  inBrakingMode: false,   // Schmitt trigger — evita flicker VELOCIDADE OK/FREIE
 
   // Configuration settings synced from Lua
   voiceEnabled: false,
