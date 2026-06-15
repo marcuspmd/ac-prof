@@ -181,7 +181,7 @@ local function preScanTrackCorners(sim)
         if w ~= 0 then
           local checkP = (progress + w / detailCount + 1.0) % 1.0
           local _, _, wSpeedKmh = aiLoader.getAiInputAtProgress(checkP)
-          if wSpeedKmh < speedKmh then
+          if wSpeedKmh < speedKmh - 0.1 then
             isMin = false
             break
           end
@@ -446,6 +446,20 @@ function M.recalculateSafeSpeedProfile(car, roadGrip)
     })
   end
 
+  -- For each corner, compute the distance to the next corner's apex and store the next
+  -- corner's target speed. Both are used by the post-apex exit ramp gate (see below).
+  local CHICANE_MAX_M = 300.0
+  local nc = #activeCorners
+  for ci = 1, nc do
+    local next = activeCorners[(ci % nc) + 1]
+    local thisApex = activeCorners[ci].turn.apexProgress
+    local nextApex = next.turn.apexProgress
+    local diff = nextApex - thisApex
+    if diff < 0 then diff = diff + 1.0 end
+    activeCorners[ci].distToNextCorner = diff * trackLength
+    activeCorners[ci].nextVTarget      = next.vTargetApex
+  end
+
   if not hasLoggedCornerTargets then
     hasLoggedCornerTargets = true
     for ci, acCorner in ipairs(activeCorners) do
@@ -471,23 +485,23 @@ function M.recalculateSafeSpeedProfile(car, roadGrip)
   for i = 1, detailCount do
     local p = (i - 1) / detailCount
     local minVSafe = 999.0 -- infinity fallback
-    
+
     for _, acCorner in ipairs(activeCorners) do
       -- Distance from current point to Entry
       local diffEntry = (acCorner.turn.entryProgress or acCorner.turn.apexProgress) - p
       if diffEntry > 0.5 then diffEntry = diffEntry - 1.0
       elseif diffEntry < -0.5 then diffEntry = diffEntry + 1.0 end
       local distToEntry = diffEntry * trackLength
-      
+
       -- Distance from current point to Apex
       local diffApex = acCorner.turn.apexProgress - p
       if diffApex > 0.5 then diffApex = diffApex - 1.0
       elseif diffApex < -0.5 then diffApex = diffApex + 1.0 end
       local distToApex = diffApex * trackLength
-      
+
       if distToApex >= 0 then
         local vSafeCorner = 999.0
-        
+
         if distToEntry >= 0 then
           -- Before Entry: full braking deceleration to vTargetEntry at the Entry point
           local B = acCorner.targetDecelFull * reactionTime
@@ -499,9 +513,21 @@ function M.recalculateSafeSpeedProfile(car, roadGrip)
           local C = -(acCorner.vTargetApex * acCorner.vTargetApex + (2 * acCorner.targetDecelTrail * distToApex) / brakingMargin)
           vSafeCorner = -B + math.sqrt(math.max(0, B * B - C))
         end
-        
+
         if vSafeCorner < minVSafe then
           minVSafe = vSafeCorner
+        end
+      elseif (acCorner.distToNextCorner or math.huge) <= CHICANE_MAX_M
+          and (acCorner.nextVTarget or 0) < acCorner.vTargetApex * 1.5 then
+        -- Post-apex exit ramp — tight chicane complexes only (≤ 300 m to next apex AND
+        -- next corner is not dramatically faster than this one). When the next corner is
+        -- fast (ratio > 1.5×), its own braking profile handles the approach; applying the
+        -- ramp there would show a misleading "brake" signal on an acceleration zone.
+        local distFromApex = -distToApex
+        if distFromApex <= acCorner.distToNextCorner then
+          local accelMs2 = physics.maxObservedAccelG * 9.81
+          local vExitMax = math.sqrt(acCorner.vTargetApex * acCorner.vTargetApex + 2.0 * accelMs2 * distFromApex)
+          if vExitMax < minVSafe then minVSafe = vExitMax end
         end
       end
     end

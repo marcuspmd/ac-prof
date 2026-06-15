@@ -15,16 +15,43 @@ require('tests.mock_runtime')        -- installs ac / vec3 / rgbm (must be first
 local H = require('tests.harness')
 
 -- Representative layouts: long straights (phantom-red prone) + technical sections.
+-- Grouped by circuit family to make the matrix easy to read.
 local TRACKS = {
+  -- Monza family
   "ks_monza66_road",
   "ks_monza66_full",
-  "imola",
+  "monza",
+  -- Silverstone family
   "ks_silverstone_gp",
+  "ks_silverstone_international",
+  "ks_silverstone_national",
+  "ks_silverstone1967",
+  -- Nürburgring family
   "ks_nurburgring_layout_gp_a",
-  "ks_laguna_seca",
-  "ks_highlands_layout_long",
+  "ks_nurburgring_layout_gp_b",
+  "ks_nurburgring_layout_sprint_a",
+  "ks_nurburgring_layout_sprint_b",
+  -- Vallelunga family
   "ks_vallelunga_classic_circuit",
-  "ks_drag_drag2000",   -- pure straight: must detect 0 corners and paint 0 false red
+  "ks_vallelunga_extended_circuit",
+  "ks_vallelunga_club_circuit",
+  -- Italian classics
+  "imola",
+  "mugello",
+  "magione",
+  -- World circuits
+  "spa",
+  "ks_zandvoort",
+  "ks_laguna_seca",
+  "lemans_2017_nochic_lights",
+  -- Road / Highland tracks
+  "ks_highlands_layout_long",
+  "la_canyons_normal",
+  -- Black Cat County
+  "ks_black_cat_county_layout_long",
+  "ks_black_cat_county_layout_int",
+  -- Pure straight: must detect 0 corners and paint 0 false red
+  "ks_drag_drag2000",
 }
 
 local CARS = { "street", "gt", "formula" }
@@ -43,8 +70,14 @@ for _, t in ipairs(TRACKS) do
   end
 end
 
--- Adverse conditions: low grip + dirty tyres on a few representative tracks.
-for _, t in ipairs({ "ks_monza66_road", "ks_silverstone_gp", "ks_nurburgring_layout_gp_a" }) do
+-- Adverse conditions: low grip + dirty tyres — one sample per circuit family.
+for _, t in ipairs({
+  "ks_monza66_road",          -- Monza family
+  "ks_silverstone_gp",        -- Silverstone family
+  "ks_nurburgring_layout_gp_a", -- Nürburgring family
+  "mugello",                  -- Italian classics
+  "spa",                      -- World circuits
+}) do
   for _, c in ipairs(CARS) do
     add(t, c, 1.0, 0.85, 0.30)
   end
